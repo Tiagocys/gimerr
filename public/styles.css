@@ -1020,19 +1020,39 @@ video.media-frame {
   background: #000000;
 }
 
-.post-card > .fluid_video_wrapper,
-.post-detail-post > .fluid_video_wrapper {
+.post-card .fluid_video_wrapper,
+.post-detail-post .fluid_video_wrapper {
+  display: block !important;
+  position: relative !important;
   width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
   aspect-ratio: 16 / 9;
+  background: #000000;
+  overflow: hidden !important;
+  z-index: 0;
+}
+
+.post-card .fluid_video_wrapper video,
+.post-detail-post .fluid_video_wrapper video {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: 16 / 9;
+  object-fit: contain !important;
   background: #000000;
 }
 
-.post-card > .fluid_video_wrapper video,
-.post-detail-post > .fluid_video_wrapper video {
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: contain;
-  background: #000000;
+.post-card .fluid_video_wrapper .media-frame,
+.post-detail-post .fluid_video_wrapper .media-frame {
+  aspect-ratio: auto;
+}
+
+.post-card .post-body,
+.post-detail-post .post-body {
+  position: relative;
+  z-index: 1;
+  background: var(--surface);
 }
 
 .post-title {

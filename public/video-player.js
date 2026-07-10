@@ -47,7 +47,35 @@
     return video.id;
   }
 
+  function ensureVideoSource(video) {
+    const source = video.querySelector("source");
+    if (source?.getAttribute("src")) return;
+
+    const src = video.getAttribute("src") || video.currentSrc;
+    if (!src) return;
+
+    const nextSource = document.createElement("source");
+    nextSource.src = src;
+    nextSource.type = video.dataset.mediaType || "video/mp4";
+    video.removeAttribute("src");
+    video.appendChild(nextSource);
+    video.load();
+  }
+
   function getPlayerOptions(config, video) {
+    const mainSource = video.querySelector("source")?.getAttribute("src") || video.getAttribute("src") || video.currentSrc || "";
+    const mainType = video.querySelector("source")?.getAttribute("type") || "video/mp4";
+    const restoreMainSource = () => {
+      if (!mainSource) return;
+      let source = video.querySelector("source");
+      if (!source) {
+        source = document.createElement("source");
+        video.appendChild(source);
+      }
+      source.src = mainSource;
+      source.type = mainType;
+      video.src = mainSource;
+    };
     const options = {
       layoutControls: {
         autoPlay: false,
@@ -68,6 +96,9 @@
           roll: config.roll || "preRoll",
           vastTag: config.vastTag,
         }],
+        vastAdvanced: {
+          noVastVideoCallback: restoreMainSource,
+        },
       };
     }
 
@@ -86,8 +117,17 @@
 
     try {
       const fluidPlayer = await loadFluidPlayer();
+      ensureVideoSource(video);
       const id = ensureVideoId(video);
       const player = fluidPlayer(id, getPlayerOptions(config, video));
+      video.addEventListener("error", () => {
+        if (video.dataset.fluidFallbackRestored) return;
+        video.dataset.fluidFallbackRestored = "true";
+        const source = video.querySelector("source")?.getAttribute("src") || video.getAttribute("src") || video.currentSrc;
+        if (!source) return;
+        video.src = source;
+        video.load();
+      });
       video.dataset.fluidState = "ready";
       video.gimerrFluidPlayer = player;
     } catch (error) {
@@ -99,25 +139,18 @@
   function bindLazyInitialization(video) {
     if (!video || video.dataset.fluidBound) return;
     video.dataset.fluidBound = "true";
-
-    const start = () => {
-      initializeVideo(video);
-    };
-
-    video.addEventListener("pointerdown", start, { once: true });
-    video.addEventListener("touchstart", start, { once: true, passive: true });
-    video.addEventListener("focus", start, { once: true });
-    video.addEventListener("play", start, { once: true });
   }
 
   function prepare(root = document) {
     const scope = root instanceof Element || root instanceof Document ? root : document;
-    scope.querySelectorAll("video[data-fluid-video]").forEach(bindLazyInitialization);
+    const videos = [...scope.querySelectorAll("video[data-fluid-video]")];
+    videos.forEach(bindLazyInitialization);
     getConfig().then((config) => {
       if (config?.enabled) {
         loadFluidPlayer().catch((error) => {
           console.warn("Não foi possível pré-carregar Fluid Player.", error);
         });
+        videos.forEach(initializeVideo);
       }
     });
   }

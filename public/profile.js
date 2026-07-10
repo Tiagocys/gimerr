@@ -526,7 +526,7 @@ function renderFeed() {
     const typeLabel = profilePostTypeLabel(post.type);
     const media = post.mediaUrl
       ? post.mediaType.startsWith("video/")
-        ? `<video class="media-frame" data-fluid-video src="${escapeHtml(post.mediaUrl)}" ${post.videoThumbnailUrl ? `poster="${escapeHtml(post.videoThumbnailUrl)}"` : ""} controls playsinline preload="metadata"></video>`
+        ? `<video class="media-frame" data-fluid-video src="${escapeHtml(post.mediaUrl)}" ${post.videoThumbnailUrl ? `poster="${escapeHtml(post.videoThumbnailUrl)}"` : ""} controls playsinline preload="metadata"><source src="${escapeHtml(post.mediaUrl)}" type="${escapeHtml(post.mediaType || "video/mp4")}"></video>`
         : `<img class="media-frame" src="${escapeHtml(post.mediaUrl)}" alt="">`
       : "";
     const gameUrl = post.gameSlug

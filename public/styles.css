@@ -1020,6 +1020,21 @@ video.media-frame {
   background: #000000;
 }
 
+.post-card > .fluid_video_wrapper,
+.post-detail-post > .fluid_video_wrapper {
+  width: 100% !important;
+  aspect-ratio: 16 / 9;
+  background: #000000;
+}
+
+.post-card > .fluid_video_wrapper video,
+.post-detail-post > .fluid_video_wrapper video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+  background: #000000;
+}
+
 .post-title {
   font-size: 1.1rem;
   line-height: 1.25;

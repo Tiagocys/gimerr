@@ -192,7 +192,7 @@
     const authorHandle = author.username ? `@${author.username}` : "@gimerr";
     const media = post.mediaUrl
       ? post.mediaType?.startsWith("video/")
-        ? `<video class="media-frame" src="${escapeHtml(post.mediaUrl)}" ${post.videoThumbnailUrl ? `poster="${escapeHtml(post.videoThumbnailUrl)}"` : ""} controls playsinline preload="metadata"></video>`
+        ? `<video class="media-frame" data-fluid-video src="${escapeHtml(post.mediaUrl)}" ${post.videoThumbnailUrl ? `poster="${escapeHtml(post.videoThumbnailUrl)}"` : ""} controls playsinline preload="metadata"></video>`
         : `<img class="media-frame" src="${escapeHtml(post.mediaUrl)}" alt="">`
       : "";
 
@@ -227,6 +227,7 @@
         </div>
       </article>
     `;
+    window.GimerrVideoPlayer?.prepare(els.card);
   }
 
   async function loadSession() {

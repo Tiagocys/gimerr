@@ -30,6 +30,17 @@
 
   if (!window.GimerrAuth || !els.title) return;
 
+  function redirectLegacySharedPostUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const postId = params.get("post");
+    if (!postId) return false;
+
+    const url = new URL("./post", window.location.origin);
+    url.searchParams.set("id", postId);
+    window.location.replace(url.toString());
+    return true;
+  }
+
   function escapeHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -147,9 +158,8 @@
   }
 
   function getPostShareUrl(postId) {
-    const url = new URL(window.location.href);
-    url.hash = "";
-    url.searchParams.set("post", postId);
+    const url = new URL("./post", window.location.origin);
+    url.searchParams.set("id", postId);
     return url.toString();
   }
 
@@ -475,5 +485,5 @@
     if (event.key === "Escape") closePostMenus();
   });
 
-  loadGame();
+  if (!redirectLegacySharedPostUrl()) loadGame();
 })();

@@ -45,6 +45,17 @@ const els = {
   feedSubtitle: document.querySelector("#profile-feed-subtitle"),
 };
 
+function redirectLegacySharedPostUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const postId = params.get("post");
+  if (!postId) return false;
+
+  const url = new URL("./post", window.location.origin);
+  url.searchParams.set("id", postId);
+  window.location.replace(url.toString());
+  return true;
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -408,9 +419,8 @@ function togglePostMenu(button) {
 }
 
 function getPostShareUrl(postId) {
-  const url = new URL(window.location.href);
-  url.hash = "";
-  url.searchParams.set("post", postId);
+  const url = new URL("./post", window.location.origin);
+  url.searchParams.set("id", postId);
   return url.toString();
 }
 
@@ -727,6 +737,8 @@ document.addEventListener("keydown", (event) => {
 });
 
 async function init() {
+  if (redirectLegacySharedPostUrl()) return;
+
   els.followButton.disabled = true;
   els.recommendButton.disabled = true;
   await hydrateAuthenticatedProfile();

@@ -855,6 +855,22 @@ select {
   overflow: hidden;
 }
 
+.post-detail-layout {
+  display: grid;
+  width: min(100%, 820px);
+  margin: 0 auto;
+  padding: 24px 28px 42px;
+}
+
+.post-detail-card {
+  display: grid;
+  gap: 14px;
+}
+
+.post-detail-post .post-title {
+  font-size: 1.15rem;
+}
+
 .post-body {
   display: grid;
   gap: 12px;
@@ -2603,6 +2619,10 @@ video.media-frame {
   }
 
   .profile-layout {
+    padding: 18px 14px 34px;
+  }
+
+  .post-detail-layout {
     padding: 18px 14px 34px;
   }
 

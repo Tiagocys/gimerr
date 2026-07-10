@@ -32,6 +32,17 @@ const els = {
   composer: document.querySelector("#composer"),
 };
 
+function redirectLegacySharedPostUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const postId = params.get("post");
+  if (!postId) return false;
+
+  const url = new URL("./post", window.location.origin);
+  url.searchParams.set("id", postId);
+  window.location.replace(url.toString());
+  return true;
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -221,9 +232,8 @@ async function reportPost(postId) {
 }
 
 function getPostShareUrl(postId) {
-  const url = new URL(window.location.href);
-  url.hash = "";
-  url.searchParams.set("post", postId);
+  const url = new URL("./post", window.location.origin);
+  url.searchParams.set("id", postId);
   return url.toString();
 }
 
@@ -730,6 +740,8 @@ els.openComposer.addEventListener("click", () => {
 });
 
 async function init() {
+  if (redirectLegacySharedPostUrl()) return;
+
   const canRender = await withTimeout(
     hydrateAuthenticatedHome(),
     15000,

@@ -201,6 +201,7 @@ async function loadProfilePosts(client, profileId) {
   if (error) throw error;
   state.posts = (data || []).map((post) => ({
     id: post.id,
+    profileId: post.profile_id,
     type: post.post_type,
     body: post.body || "",
     mediaUrl: post.media_url || "",
@@ -369,6 +370,133 @@ function renderPublicInfo() {
   `;
 }
 
+function renderPostMenu(post) {
+  const postId = escapeHtml(post.id);
+  const isOwner = state.session?.user?.id && post.profileId === state.session.user.id;
+  return `
+    <div class="post-menu" data-post-menu>
+      <button class="ghost-icon post-menu-button" type="button" data-post-menu-toggle data-post-id="${postId}" aria-label="Abrir menu do post" aria-expanded="false">
+        <span aria-hidden="true">&#8942;</span>
+      </button>
+      <div class="post-menu-popover" hidden>
+        <button type="button" data-post-share data-post-id="${postId}">Compartilhar</button>
+        ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
+        ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Apagar post</button>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function closePostMenus(exceptMenu = null) {
+  document.querySelectorAll("[data-post-menu]").forEach((menu) => {
+    if (exceptMenu && menu === exceptMenu) return;
+    const popover = menu.querySelector(".post-menu-popover");
+    const toggle = menu.querySelector("[data-post-menu-toggle]");
+    if (popover) popover.hidden = true;
+    if (toggle) toggle.setAttribute("aria-expanded", "false");
+  });
+}
+
+function togglePostMenu(button) {
+  const menu = button.closest("[data-post-menu]");
+  const popover = menu?.querySelector(".post-menu-popover");
+  if (!menu || !popover) return;
+  const willOpen = popover.hidden;
+  closePostMenus(menu);
+  popover.hidden = !willOpen;
+  button.setAttribute("aria-expanded", String(willOpen));
+}
+
+function getPostShareUrl(postId) {
+  const url = new URL(window.location.href);
+  url.hash = "";
+  url.searchParams.set("post", postId);
+  return url.toString();
+}
+
+async function copyTextToClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  input.remove();
+}
+
+async function sharePost(postId) {
+  const url = getPostShareUrl(postId);
+  const post = state.posts.find((item) => String(item.id) === String(postId));
+  const title = post?.type === "video"
+    ? `Veja este vídeo no Gimerr`
+    : `Veja este post no Gimerr`;
+
+  if (navigator.share) {
+    await navigator.share({
+      title,
+      text: `Publicado em ${post?.gameName || "Gimerr"}`,
+      url,
+    });
+    return;
+  }
+
+  await copyTextToClipboard(url);
+  window.alert("Link copiado.");
+}
+
+async function reportPost(postId) {
+  if (!state.session?.access_token) {
+    window.location.assign("./sign-in.html");
+    return;
+  }
+
+  const reason = window.prompt("Informe o motivo da denúncia. Você pode deixar em branco.");
+  if (reason === null) return;
+
+  const response = await fetch("/api/posts/report", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${state.session.access_token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ postId, reason }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Não foi possível denunciar este post.");
+  window.alert("Denúncia enviada.");
+}
+
+async function deletePost(postId) {
+  if (!state.session?.access_token) return;
+  const confirmed = window.confirm("Apagar este post? Essa ação também remove a mídia enviada.");
+  if (!confirmed) return;
+
+  const response = await fetch("/api/posts/delete", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${state.session.access_token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ postId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Não foi possível apagar este post.");
+
+  state.posts = state.posts.filter((post) => String(post.id) !== String(postId));
+  state.postsCount = Math.max(0, state.postsCount - 1);
+  renderCounts();
+  renderFeed();
+}
+
 function renderFeed() {
   if (state.loading) return;
   if (state.profileMissing) return;
@@ -400,6 +528,9 @@ function renderFeed() {
         <div class="post-body">
           <div class="post-meta">
             <span>${escapeHtml(formatRelativeTime(post.createdAt))}</span>
+            <div class="post-card-tools">
+              ${renderPostMenu(post)}
+            </div>
           </div>
           <div>
             <h3 class="post-title">${escapeHtml(typeLabel)}</h3>
@@ -532,8 +663,67 @@ els.peopleModal.addEventListener("click", (event) => {
   if (event.target === els.peopleModal) closePeopleModal();
 });
 
+document.addEventListener("click", async (event) => {
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  if (!target) return;
+
+  const menuToggle = target.closest("[data-post-menu-toggle]");
+  if (menuToggle) {
+    event.preventDefault();
+    togglePostMenu(menuToggle);
+    return;
+  }
+
+  const shareButton = target.closest("[data-post-share]");
+  if (shareButton) {
+    event.preventDefault();
+    closePostMenus();
+    try {
+      await sharePost(shareButton.dataset.postId);
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      console.warn("Não foi possível compartilhar post.", error);
+      window.alert("Não foi possível compartilhar este post.");
+    }
+    return;
+  }
+
+  const reportButton = target.closest("[data-post-report]");
+  if (reportButton) {
+    event.preventDefault();
+    closePostMenus();
+    try {
+      await reportPost(reportButton.dataset.postId);
+    } catch (error) {
+      console.warn("Não foi possível denunciar post.", error);
+      window.alert(error.message || "Não foi possível denunciar este post.");
+    }
+    return;
+  }
+
+  const deleteButton = target.closest("[data-post-delete]");
+  if (deleteButton) {
+    event.preventDefault();
+    closePostMenus();
+    try {
+      await deletePost(deleteButton.dataset.postId);
+    } catch (error) {
+      console.warn("Não foi possível apagar post.", error);
+      window.alert(error.message || "Não foi possível apagar este post.");
+    }
+    return;
+  }
+
+  if (!target.closest("[data-post-menu]")) {
+    closePostMenus();
+  }
+});
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !els.peopleModal.hidden) closePeopleModal();
+  if (event.key === "Escape") {
+    if (!els.peopleModal.hidden) closePeopleModal();
+    closePostMenus();
+  }
 });
 
 async function init() {

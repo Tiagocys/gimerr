@@ -169,7 +169,8 @@ function renderPostMenu(post) {
         <span aria-hidden="true">&#8942;</span>
       </button>
       <div class="post-menu-popover" hidden>
-        <button type="button" data-post-report data-post-id="${postId}">Denunciar</button>
+        <button type="button" data-post-share data-post-id="${postId}">Compartilhar</button>
+        ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
         ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Apagar post</button>` : ""}
       </div>
     </div>
@@ -217,6 +218,51 @@ async function reportPost(postId) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Não foi possível denunciar este post.");
   window.alert("Denúncia enviada.");
+}
+
+function getPostShareUrl(postId) {
+  const url = new URL(window.location.href);
+  url.hash = "";
+  url.searchParams.set("post", postId);
+  return url.toString();
+}
+
+async function copyTextToClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  input.remove();
+}
+
+async function sharePost(postId) {
+  const url = getPostShareUrl(postId);
+  const post = posts.find((item) => String(item.id) === String(postId));
+  const gameName = post?.game?.name || getGame(post?.gameId)?.name || "Gimerr";
+  const title = post?.type === "video"
+    ? `Veja este vídeo no Gimerr`
+    : `Veja este post no Gimerr`;
+
+  if (navigator.share) {
+    await navigator.share({
+      title,
+      text: `Publicado em ${gameName}`,
+      url,
+    });
+    return;
+  }
+
+  await copyTextToClipboard(url);
+  window.alert("Link copiado.");
 }
 
 async function deletePost(postId) {
@@ -637,6 +683,20 @@ document.addEventListener("click", async (event) => {
     } catch (error) {
       console.warn("Não foi possível denunciar post.", error);
       window.alert(error.message || "Não foi possível denunciar este post.");
+    }
+    return;
+  }
+
+  const shareButton = target.closest("[data-post-share]");
+  if (shareButton) {
+    event.preventDefault();
+    closePostMenus();
+    try {
+      await sharePost(shareButton.dataset.postId);
+    } catch (error) {
+      if (error?.name === "AbortError") return;
+      console.warn("Não foi possível compartilhar post.", error);
+      window.alert("Não foi possível compartilhar este post.");
     }
     return;
   }

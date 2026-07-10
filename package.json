@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "dev": "wrangler pages dev public --ip 0.0.0.0 --port 8788 --r2 GIMERR_R2_BUCKET --compatibility-date=2025-12-17",
+    "igdb:sync": "node scripts/igdb-daily-sync.mjs",
+    "video-worker": "node scripts/video-worker.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.56.0"
+  }
+}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-label="Clipe de gameplay em uma arena">
+  <rect width="960" height="540" fill="#111827"/>
+  <path d="M0 410h960v130H0z" fill="#0f766e"/>
+  <path d="M120 90h720v330H120z" fill="#1f2937"/>
+  <path d="M158 126h644v258H158z" fill="#0b1220"/>
+  <path d="M235 330h500l-76-128H311z" fill="#253246"/>
+  <circle cx="480" cy="262" r="72" fill="#2563eb" opacity=".9"/>
+  <path d="m455 219 82 43-82 43z" fill="#fff"/>
+  <path d="M162 126h180l-54 258H158z" fill="#14b8a6" opacity=".35"/>
+  <path d="M802 126H622l54 258h126z" fill="#f59e0b" opacity=".38"/>
+  <rect x="176" y="438" width="608" height="22" rx="11" fill="#e5e7eb" opacity=".9"/>
+  <rect x="176" y="438" width="346" height="22" rx="11" fill="#ef4444"/>
+</svg>

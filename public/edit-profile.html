@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <title>Editar perfil | Gimerr</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Gimerr">
+        <img class="brand-logo" src="./assets/logo.png" alt="Gimerr">
+      </a>
+
+      <div class="search-box">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M10.8 18.1a7.3 7.3 0 1 1 5.1-2.1l4 4-1.4 1.4-4-4a7.3 7.3 0 0 1-3.7 1Zm0-2a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6Z"/>
+        </svg>
+        <input id="edit-search" type="search" placeholder="Buscar no Gimerr" aria-label="Buscar usuários no Gimerr">
+      </div>
+
+      <nav class="top-actions" aria-label="Ações principais">
+        <a class="auth-button" href="./sign-in.html" hidden>Entrar</a>
+        <div class="account-menu" data-account-menu hidden></div>
+      </nav>
+    </header>
+
+    <main class="settings-layout">
+      <section class="settings-head">
+        <div>
+          <h1>Editar perfil</h1>
+          <p>Atualize como outras pessoas encontram e reconhecem você no Gimerr.</p>
+        </div>
+        <button class="primary-button" id="save-profile" type="button">Salvar alterações</button>
+      </section>
+
+      <form class="settings-grid" id="profile-edit-form">
+        <section class="settings-panel" aria-labelledby="profile-basic-title">
+          <div class="settings-section-head">
+            <h2 id="profile-basic-title">Dados públicos</h2>
+            <span id="save-feedback" role="status"></span>
+          </div>
+
+          <div class="field-group">
+            <label for="display-name">Nome</label>
+            <input id="display-name" name="displayName" type="text" autocomplete="name" placeholder="Como você quer ser chamado">
+          </div>
+
+          <div class="field-group">
+            <label for="username">Username</label>
+            <div class="username-field">
+              <span>@</span>
+              <input id="username" name="username" type="text" autocomplete="username" placeholder="seu_username" value="maya">
+            </div>
+            <p class="field-feedback" id="username-feedback">Username disponível.</p>
+          </div>
+
+          <div class="field-group">
+            <label for="phone">Telefone</label>
+            <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+55 11 99999-9999">
+          </div>
+
+          <fieldset class="contact-channel-field" id="contact-channel-field">
+            <legend>Exibir contato pelo telefone</legend>
+            <label>
+              <input id="phone-whatsapp" type="checkbox" name="phoneWhatsapp">
+              <span>WhatsApp</span>
+            </label>
+            <label>
+              <input id="phone-telegram" type="checkbox" name="phoneTelegram">
+              <span>Telegram</span>
+            </label>
+          </fieldset>
+
+          <fieldset class="visibility-field" id="visibility-field">
+            <legend>Visibilidade do telefone</legend>
+            <label>
+              <input type="radio" name="phoneVisibility" value="private" checked>
+              <span>Privado</span>
+            </label>
+            <label>
+              <input type="radio" name="phoneVisibility" value="public">
+              <span>Público</span>
+            </label>
+          </fieldset>
+        </section>
+
+        <section class="settings-panel" aria-labelledby="profile-photo-title">
+          <div class="settings-section-head">
+            <h2 id="profile-photo-title">Fotos</h2>
+          </div>
+
+          <div class="crop-grid">
+            <article class="crop-control">
+              <div class="crop-preview avatar-crop" id="avatar-preview">
+                <img src="./assets/clip-arena.svg" alt="">
+              </div>
+              <div class="crop-actions">
+                <strong>Foto do perfil</strong>
+                <label class="text-button file-button" for="avatar-file">Trocar foto</label>
+                <input id="avatar-file" type="file" accept="image/*">
+              </div>
+              <div class="crop-sliders">
+                <label>
+                  Zoom
+                  <input id="avatar-zoom" type="range" min="100" max="300" value="100">
+                </label>
+                <label>
+                  Horizontal
+                  <input id="avatar-x" type="range" min="0" max="100" value="50">
+                </label>
+                <label>
+                  Vertical
+                  <input id="avatar-y" type="range" min="0" max="100" value="50">
+                </label>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="settings-panel platforms-panel" aria-labelledby="platforms-title">
+          <div class="settings-section-head">
+            <h2 id="platforms-title">Plataformas conectadas</h2>
+          </div>
+
+          <div class="platform-list" id="platform-list"></div>
+        </section>
+      </form>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="username-change-modal" hidden>
+    <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="username-change-title" aria-describedby="username-change-copy">
+      <div class="modal-head">
+        <h2 id="username-change-title">Alterar username?</h2>
+      </div>
+      <p id="username-change-copy">
+        Você só poderá alterar seu username novamente depois de 15 dias. Deseja prosseguir com esta alteração?
+      </p>
+      <div class="confirm-modal-preview" id="username-change-preview"></div>
+      <div class="confirm-modal-actions">
+        <button class="text-button" id="username-change-cancel" type="button">Cancelar</button>
+        <button class="primary-button" id="username-change-confirm" type="button">Prosseguir</button>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-client.js"></script>
+  <script src="./user-search.js" defer></script>
+  <script src="./navbar.js" defer></script>
+  <script src="./edit-profile.js" defer></script>
+</body>
+</html>

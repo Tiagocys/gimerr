@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <title>Perfil | Gimerr</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Gimerr">
+        <img class="brand-logo" src="./assets/logo.png" alt="Gimerr">
+      </a>
+
+      <div class="search-box">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M10.8 18.1a7.3 7.3 0 1 1 5.1-2.1l4 4-1.4 1.4-4-4a7.3 7.3 0 0 1-3.7 1Zm0-2a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6Z"/>
+        </svg>
+        <input id="profile-search" type="search" placeholder="Buscar no perfil" aria-label="Buscar no perfil e usuários">
+      </div>
+
+      <nav class="top-actions" aria-label="Ações principais">
+        <a class="text-button" href="./index.html">Feed</a>
+        <a class="auth-button" href="./sign-in.html" hidden>Entrar</a>
+        <div class="account-menu" data-account-menu hidden></div>
+      </nav>
+    </header>
+
+    <main class="profile-layout is-loading" id="profile-layout">
+      <section class="profile-hero" aria-labelledby="profile-display-name">
+        <div class="profile-summary">
+          <div class="profile-main">
+            <div class="profile-avatar-large">
+              <img src="./assets/avatar.svg" alt="">
+            </div>
+            <div class="profile-identity">
+              <h1 id="profile-display-name">Carregando perfil...</h1>
+              <div class="profile-public-info" id="profile-public-info"></div>
+            </div>
+          </div>
+
+          <div class="profile-actions">
+            <a class="text-button" id="edit-profile-link" href="./edit-profile.html">Editar perfil</a>
+            <button class="primary-button" id="follow-button" type="button">Seguir</button>
+            <button class="text-button" id="recommend-button" type="button">Recomendar</button>
+          </div>
+        </div>
+
+        <div class="profile-stats" aria-label="Métricas do perfil">
+          <button class="stat-button" id="followers-button" type="button">
+            <strong id="followers-count">0</strong>
+            <span>seguidores</span>
+          </button>
+          <button class="stat-button" id="recommendations-button" type="button">
+            <strong id="recommendations-count">0</strong>
+            <span>recomendações</span>
+          </button>
+          <div class="stat-button stat-static">
+            <strong id="posts-count">0</strong>
+            <span>publicações</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="profile-content" aria-label="Conteúdo do usuário">
+        <div class="profile-feed-header">
+          <div>
+            <h2>Conteúdo</h2>
+            <p id="profile-feed-subtitle">Posts criados e compartilhados.</p>
+          </div>
+        </div>
+
+        <div class="feed-list" id="profile-feed-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="people-modal" hidden>
+    <section class="people-modal" role="dialog" aria-modal="true" aria-labelledby="people-modal-title">
+      <div class="modal-head">
+        <h2 id="people-modal-title">Usuários</h2>
+        <button class="ghost-icon" id="people-modal-close" type="button" aria-label="Fechar">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4 6.4 5Z"/>
+          </svg>
+        </button>
+      </div>
+      <div class="people-list" id="people-list"></div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-client.js"></script>
+  <script src="./user-search.js" defer></script>
+  <script src="./navbar.js" defer></script>
+  <script src="./profile.js" defer></script>
+</body>
+</html>

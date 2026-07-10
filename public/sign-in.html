@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <title>Criar conta | Gimerr</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="auth-page">
+  <main class="auth-layout">
+    <section class="auth-card" aria-labelledby="auth-title">
+      <div class="auth-header">
+        <a class="brand" href="/" aria-label="Gimerr">
+          <img class="brand-logo" src="./assets/logo.png" alt="Gimerr">
+        </a>
+        <div>
+          <h1 id="auth-title">Criar conta no Gimerr</h1>
+          <p>Entre com uma conta conectada. O Gimerr usa provedores seguros para manter sua sessão ativa.</p>
+        </div>
+      </div>
+
+      <div class="oauth-button-list">
+        <button class="oauth-button google-button" id="google-auth" type="button" data-provider="google">
+          <img src="./assets/google.svg" alt="">
+          <span>Continuar com Google</span>
+        </button>
+        <button class="oauth-button discord-button" id="discord-auth" type="button" data-provider="discord">
+          <img src="./assets/discord.svg" alt="">
+          <span>Continuar com Discord</span>
+        </button>
+        <button class="oauth-button twitch-button" id="twitch-auth" type="button" data-provider="twitch">
+          <img src="./assets/twitch.svg" alt="">
+          <span>Continuar com Twitch</span>
+        </button>
+      </div>
+
+      <p class="auth-feedback" id="auth-feedback" role="status"></p>
+    </section>
+
+    <section class="integration-card" id="discord-app" aria-labelledby="discord-app-title">
+      <div class="integration-visual" aria-hidden="true">
+        <span class="integration-tile"></span>
+        <span class="integration-tile"></span>
+        <span class="integration-tile"></span>
+      </div>
+      <div>
+        <h2 id="discord-app-title">Discord no Gimerr</h2>
+        <p>O login pode ser feito com Discord, mas o App do Gimerr continua separado para operar servidores e canais.</p>
+      </div>
+      <ul class="integration-list">
+        <li>
+          <span class="check-mark">✓</span>
+          <div>
+            <strong>Instalar o Gimerr em servidores</strong>
+            <span>Administradores conectam o App ao servidor quando quiserem publicar conteúdo por lá.</span>
+          </div>
+        </li>
+        <li>
+          <span class="check-mark">✓</span>
+          <div>
+            <strong>Publicar posts em canais</strong>
+            <span>Posts, anúncios e vídeos podem ser enviados automaticamente para canais configurados.</span>
+          </div>
+        </li>
+        <li>
+          <span class="check-mark">✓</span>
+          <div>
+            <strong>Validar administração de servidor</strong>
+            <span>O bot ajuda a confirmar permissões sem depender da sessão OAuth do Discord.</span>
+          </div>
+        </li>
+        <li>
+          <span class="check-mark">✓</span>
+          <div>
+            <strong>Vincular Discord ao perfil</strong>
+            <span>O usuário conecta sua conta Discord ao perfil do Gimerr sem trocar a autenticação principal.</span>
+          </div>
+        </li>
+        <li>
+          <span class="check-mark">✓</span>
+          <div>
+            <strong>Sincronizar servidores e canais</strong>
+            <span>O Gimerr atualiza servidores públicos, canais disponíveis e destinos de publicação.</span>
+          </div>
+        </li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-client.js"></script>
+  <script src="./sign-in.js" defer></script>
+</body>
+</html>

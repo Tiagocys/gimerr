@@ -1,0 +1,7 @@
+name = "gimerr"
+pages_build_output_dir = "public"
+compatibility_date = "2025-12-17"
+
+[[r2_buckets]]
+binding = "GIMERR_R2_BUCKET"
+bucket_name = "gimerr"

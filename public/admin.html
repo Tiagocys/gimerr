@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <title>Admin | Gimerr</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Gimerr">
+        <img class="brand-logo" src="./assets/logo.png" alt="Gimerr">
+      </a>
+
+      <div class="search-box">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M10.8 18.1a7.3 7.3 0 1 1 5.1-2.1l4 4-1.4 1.4-4-4a7.3 7.3 0 0 1-3.7 1Zm0-2a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6Z"/>
+        </svg>
+        <input id="admin-search" type="search" placeholder="Buscar no Gimerr" aria-label="Buscar no Gimerr">
+      </div>
+
+      <nav class="top-actions" aria-label="Ações principais">
+        <a class="text-button" href="./index.html">Feed</a>
+        <a class="auth-button" href="./sign-in.html" hidden>Entrar</a>
+        <div class="account-menu" data-account-menu hidden></div>
+      </nav>
+    </header>
+
+    <main class="admin-layout">
+      <nav class="admin-tabs" aria-label="Áreas administrativas">
+        <button class="filter-chip is-active" type="button" data-admin-tab="games">Solicitações de jogos</button>
+        <button class="filter-chip" type="button" data-admin-tab="reports">Denúncias</button>
+      </nav>
+
+      <section class="admin-panel" data-admin-panel="games">
+        <section class="admin-head">
+          <div>
+            <h1>Solicitações de jogos</h1>
+            <p>Aprove ou rejeite jogos enviados pela comunidade.</p>
+          </div>
+          <select id="admin-status-filter" aria-label="Filtrar solicitações">
+            <option value="pending">Pendentes</option>
+            <option value="approved">Aprovadas</option>
+            <option value="rejected">Rejeitadas</option>
+            <option value="all">Todas</option>
+          </select>
+        </section>
+
+        <p class="admin-feedback" id="admin-feedback" role="status">Carregando solicitações...</p>
+        <section class="admin-request-list" id="admin-request-list" aria-label="Lista de solicitações"></section>
+      </section>
+
+      <section class="admin-panel" data-admin-panel="reports" hidden>
+        <section class="admin-head">
+          <div>
+            <h1>Denúncias</h1>
+            <p>Analise conteúdos denunciados e aplique ações de moderação.</p>
+          </div>
+          <select id="admin-report-status-filter" aria-label="Filtrar denúncias">
+            <option value="pending">Pendentes</option>
+            <option value="resolved">Resolvidas</option>
+            <option value="all">Todas</option>
+          </select>
+        </section>
+
+        <p class="admin-feedback" id="admin-report-feedback" role="status">Abra esta aba para carregar denúncias.</p>
+        <section class="admin-report-list" id="admin-report-list" aria-label="Lista de denúncias"></section>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-client.js"></script>
+  <script src="./user-search.js" defer></script>
+  <script src="./navbar.js" defer></script>
+  <script src="./admin.js" defer></script>
+</body>
+</html>

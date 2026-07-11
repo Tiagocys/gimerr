@@ -14,6 +14,7 @@ function setFeedback(message, tone = "") {
 }
 
 function setLoading(isLoading, label = "Verificando...") {
+  if (!authButton) return;
   authButton.disabled = isLoading;
   authButton.classList.toggle("is-loading", isLoading);
   authButton.querySelector("span").textContent = isLoading ? label : "Continuar com Discord";
@@ -53,7 +54,7 @@ async function completeVerification() {
   const token = getToken();
   if (!token) {
     setFeedback("Link de verificação inválido. Clique novamente no botão do Discord.", "error");
-    authButton.disabled = true;
+    if (authButton) authButton.disabled = true;
     return;
   }
 
@@ -90,7 +91,11 @@ async function completeVerification() {
     title.textContent = "Sua conta foi verificada.";
     summary.textContent = "Você será redirecionado para o Gimerr em instantes...";
     setFeedback("", "success");
-    actions.hidden = true;
+    if (actions) {
+      actions.hidden = true;
+    } else if (authButton) {
+      authButton.hidden = true;
+    }
     window.history.replaceState({}, document.title, `${window.location.origin}${window.location.pathname}`);
     redirectToFeedSoon();
   } catch (error) {
@@ -99,5 +104,5 @@ async function completeVerification() {
   }
 }
 
-authButton.addEventListener("click", signInWithDiscord);
+if (authButton) authButton.addEventListener("click", signInWithDiscord);
 completeVerification();

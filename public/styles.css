@@ -976,6 +976,127 @@ select {
   color: var(--red);
 }
 
+.verification-modal {
+  display: grid;
+  width: min(100%, 520px);
+  max-height: min(620px, calc(100vh - 32px));
+  gap: 14px;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.verification-copy {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.verification-steps {
+  display: grid;
+  gap: 10px;
+}
+
+.verification-step {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+}
+
+.verification-step.is-disabled {
+  opacity: 0.62;
+}
+
+.verification-step strong {
+  font-size: 0.95rem;
+}
+
+.verification-step span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.verification-step code {
+  display: inline-flex;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.86em;
+}
+
+.verification-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 40px;
+  margin-top: 4px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.verification-action-button:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+}
+
+.verification-action-button.discord {
+  background: #5865f2;
+  border-color: #5865f2;
+  color: #fff;
+}
+
+.verification-action-button.discord:hover {
+  background: #4752c4;
+  border-color: #4752c4;
+  color: #fff;
+}
+
+.verification-action-button small {
+  color: currentColor;
+  font-size: 0.76rem;
+  opacity: 0.78;
+}
+
+.verification-code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px dashed var(--blue);
+  border-radius: var(--radius);
+  background: var(--blue-soft);
+  color: var(--blue);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .status-pill.public {
   background: #dcfce7;
   color: var(--green);

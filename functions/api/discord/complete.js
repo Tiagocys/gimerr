@@ -1,4 +1,5 @@
 import { getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
+import { getServiceHeaders } from "../../_shared/admin.js";
 import { verifyDiscordState } from "../../_shared/discord_oauth.js";
 
 export async function onRequestPost({ request, env }) {
@@ -44,6 +45,22 @@ export async function onRequestPost({ request, env }) {
       return jsonResponse({
         error: payload.message || "Não foi possível salvar a conexão Discord.",
       }, { status: response.status });
+    }
+
+    const profileUrl = new URL(`${supabaseRestUrl}/profiles`);
+    profileUrl.searchParams.set("id", `eq.${auth.user.id}`);
+    const profileResponse = await fetch(profileUrl.toString(), {
+      method: "PATCH",
+      headers: getServiceHeaders(env),
+      body: JSON.stringify({
+        discord_id: result.discord.id,
+      }),
+    });
+    const profilePayload = await profileResponse.json().catch(() => ({}));
+    if (!profileResponse.ok) {
+      return jsonResponse({
+        error: profilePayload.message || "Não foi possível salvar o Discord no perfil.",
+      }, { status: profileResponse.status });
     }
 
     return jsonResponse({

@@ -1,5 +1,6 @@
 import { deleteR2Object, getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
+import { requireVerifiedProfile } from "../../_shared/verification.js";
 
 const VALID_TYPES = new Set(["post", "video", "listing"]);
 const VALID_MEDIA_PREFIXES = ["posts/", "videos/", "market/"];
@@ -54,6 +55,9 @@ export async function onRequestPost({ request, env }) {
   try {
     const auth = await requireAuthUser(request, env);
     if (auth.error) return auth.error;
+
+    const verification = await requireVerifiedProfile(env, auth.user.id);
+    if (verification.error) return verification.error;
 
     const payload = await request.json().catch(() => ({}));
     const gameId = Number(payload.gameId);

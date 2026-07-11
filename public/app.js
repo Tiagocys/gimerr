@@ -30,6 +30,11 @@ const els = {
   publishPost: document.querySelector("#publish-post"),
   openComposer: document.querySelector("#open-composer"),
   composer: document.querySelector("#composer"),
+  verificationModal: document.querySelector("#verification-modal"),
+  verificationSteps: document.querySelector("#verification-steps"),
+  verificationFeedback: document.querySelector("#verification-feedback"),
+  verificationPrimary: document.querySelector("#verification-primary"),
+  verificationClose: document.querySelector("#verification-close"),
 };
 
 function redirectLegacySharedPostUrl() {
@@ -252,6 +257,167 @@ async function copyTextToClipboard(value) {
   input.select();
   document.execCommand("copy");
   input.remove();
+}
+
+function setVerificationFeedback(message, tone = "") {
+  els.verificationFeedback.textContent = message || "";
+  els.verificationFeedback.className = `field-feedback${tone ? ` is-${tone}` : ""}`;
+}
+
+function renderVerificationSteps(status = {}) {
+  const channelName = status.verifyChannelName || "verify";
+  const discordButtonLabel = status.discordLinked ? "Discord conectado" : "Conectar Discord";
+  const discordButtonMeta = status.discordLinked && status.discordHandle ? status.discordHandle : "Auth do Discord";
+  const inviteButton = status.serverInviteUrl
+    ? `<a class="verification-action-button" href="${escapeHtml(status.serverInviteUrl)}" target="_blank" rel="noopener">
+        <span>Entrar no servidor oficial</span>
+      </a>`
+    : "";
+  const inviteStep = `<div class="verification-step">
+    <strong>2. Entre no servidor oficial do Gimerr</strong>
+    <span>O servidor usa a verificação do próprio Discord para reduzir spam e contas falsas.</span>
+    ${inviteButton || "<span>O convite do servidor oficial ainda não está configurado.</span>"}
+  </div>`;
+  const botStep = status.discordLinked
+    ? `<div class="verification-step">
+        <strong>3. Confirme sua conta no canal #${escapeHtml(channelName)}</strong>
+        <span>Depois de entrar no servidor, clique no botão <code>Verify Gimerr Account</code> no canal #${escapeHtml(channelName)}. O bot envia um link seguro para autenticar este mesmo Discord no Gimerr.</span>
+      </div>`
+    : `<div class="verification-step is-disabled">
+        <strong>3. Confirme sua conta com o bot</strong>
+        <span>Essa etapa aparece depois que sua conta Discord estiver conectada.</span>
+      </div>`;
+
+  els.verificationSteps.innerHTML = `
+    <div class="verification-step">
+      <strong>1. Conecte seu Discord</strong>
+      <button class="verification-action-button discord" type="button" data-verification-action="connect">
+        <img src="/assets/discord.svg" width="20" height="20" alt="">
+        <span>${escapeHtml(discordButtonLabel)}</span>
+        <small>${escapeHtml(discordButtonMeta)}</small>
+      </button>
+    </div>
+    ${inviteStep}
+    ${botStep}
+  `;
+}
+
+function openVerificationModal(status = {}) {
+  renderVerificationSteps(status);
+  setVerificationFeedback("");
+  els.verificationPrimary.textContent = status.discordLinked ? "Abrir servidor do Discord" : "Verificar com Discord";
+  els.verificationPrimary.dataset.action = status.discordLinked ? "open_invite" : "connect";
+  els.verificationPrimary.dataset.invite = status.serverInviteUrl || "";
+  els.verificationPrimary.dataset.code = "";
+  els.verificationModal.hidden = false;
+  els.verificationPrimary.focus();
+}
+
+function closeVerificationModal() {
+  els.verificationModal.hidden = true;
+}
+
+async function loadVerificationStatus() {
+  const response = await fetch("/api/verification/status", {
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${state.session.access_token}`,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Não foi possível carregar a verificação.");
+  return payload;
+}
+
+async function startDiscordVerification() {
+  const response = await fetch("/api/discord/start", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${state.session.access_token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ redirectPath: "/" }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Não foi possível iniciar Discord.");
+  window.location.assign(payload.authorizeUrl);
+}
+
+async function generateDiscordVerificationCode() {
+  els.verificationPrimary.disabled = true;
+  els.verificationPrimary.textContent = "Gerando...";
+  setVerificationFeedback("");
+
+  try {
+    const response = await fetch("/api/verification/discord-challenge", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${state.session.access_token}`,
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível gerar código.");
+
+    const invite = payload.serverInviteUrl
+      ? `<a class="text-link" href="${escapeHtml(payload.serverInviteUrl)}" target="_blank" rel="noopener">Entrar no servidor oficial</a>`
+      : "";
+    els.verificationSteps.innerHTML = `
+      <div class="verification-step">
+        <strong>Seu código</strong>
+        <span class="verification-code">${escapeHtml(payload.code)}</span>
+      </div>
+      <div class="verification-step">
+        <strong>Envie no canal #${escapeHtml(payload.verifyChannelName || "verify")}</strong>
+        <span>Entre no servidor oficial do Gimerr e envie exatamente este código no canal de verificação.</span>
+        ${invite}
+      </div>
+    `;
+    els.verificationPrimary.textContent = "Copiar código";
+    els.verificationPrimary.dataset.action = "copy";
+    els.verificationPrimary.dataset.code = payload.code;
+    setVerificationFeedback("Após enviar o código no Discord, tente publicar novamente.", "success");
+  } finally {
+    els.verificationPrimary.disabled = false;
+  }
+}
+
+async function completeDiscordConnectionFromCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("discord");
+  if (!status) return;
+
+  if (status === "complete") {
+    try {
+      setVerificationFeedback("Salvando conexão Discord...");
+      const response = await fetch("/api/discord/complete", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${state.session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ result: params.get("result") }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Não foi possível concluir Discord.");
+      const verificationStatus = await loadVerificationStatus();
+      openVerificationModal(verificationStatus);
+      setVerificationFeedback("Discord conectado. Entre no servidor oficial e envie verificar no canal indicado.", "success");
+    } catch (error) {
+      openVerificationModal({});
+      setVerificationFeedback(error.message || "Não foi possível conectar Discord.", "error");
+    }
+  } else if (status === "cancelled") {
+    openVerificationModal({});
+    setVerificationFeedback("Conexão com Discord cancelada.", "warning");
+  } else if (status === "error") {
+    openVerificationModal({});
+    setVerificationFeedback(params.get("message") || "Não foi possível conectar Discord.", "error");
+  }
+
+  window.history.replaceState({}, document.title, `${window.location.origin}${window.location.pathname}`);
 }
 
 async function sharePost(postId) {
@@ -545,7 +711,13 @@ async function uploadComposerMedia(file, target) {
     body: formData,
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Não foi possível enviar a mídia.");
+  if (!response.ok) {
+    const error = new Error(payload.error || "Não foi possível enviar a mídia.");
+    error.code = payload.code;
+    error.discordLinked = payload.discordLinked;
+    error.verificationStatus = payload.verificationStatus;
+    throw error;
+  }
   if (target === "video") {
     logVideoStage("upload-finished", {
       key: payload.key,
@@ -580,7 +752,13 @@ async function createFeedPost({ game, type, text, uploadedMedia }) {
     }),
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Não foi possível publicar.");
+  if (!response.ok) {
+    const error = new Error(payload.error || "Não foi possível publicar.");
+    error.code = payload.code;
+    error.discordLinked = payload.discordLinked;
+    error.verificationStatus = payload.verificationStatus;
+    throw error;
+  }
   if (type === "video") {
     logVideoStage("post-create-finished", {
       postId: payload.post?.id,
@@ -628,6 +806,14 @@ async function publishPost() {
     renderFeed();
   } catch (error) {
     console.warn("Não foi possível publicar.", error);
+    if (error.code === "account_not_verified") {
+      const status = await loadVerificationStatus().catch(() => ({
+        discordLinked: Boolean(error.discordLinked),
+        verificationStatus: error.verificationStatus || "unverified",
+      }));
+      openVerificationModal(status);
+      return;
+    }
     window.alert(error.message || "Não foi possível publicar.");
   } finally {
     setPublishing(false);
@@ -674,6 +860,43 @@ els.search.addEventListener("input", (event) => {
 els.publishPost.addEventListener("click", publishPost);
 els.composerFile.addEventListener("change", renderComposerFile);
 els.composerClearFile.addEventListener("click", clearComposerFile);
+els.verificationClose.addEventListener("click", closeVerificationModal);
+els.verificationSteps.addEventListener("click", async (event) => {
+  const button = event.target instanceof Element
+    ? event.target.closest("[data-verification-action]")
+    : null;
+  if (!button) return;
+
+  try {
+    if (button.dataset.verificationAction === "connect") {
+      await startDiscordVerification();
+    }
+  } catch (error) {
+    setVerificationFeedback(error.message || "Não foi possível continuar a verificação.", "error");
+  }
+});
+els.verificationPrimary.addEventListener("click", async () => {
+  try {
+    const action = els.verificationPrimary.dataset.action || "connect";
+    if (action === "connect") {
+      await startDiscordVerification();
+    } else if (action === "challenge") {
+      await generateDiscordVerificationCode();
+    } else if (action === "open_invite") {
+      const invite = els.verificationPrimary.dataset.invite || "";
+      if (!invite) throw new Error("Convite do servidor oficial ainda não configurado.");
+      window.open(invite, "_blank", "noopener");
+    } else if (action === "copy_verify_command") {
+      await copyTextToClipboard("verificar");
+      setVerificationFeedback("Mensagem copiada. Cole no canal #verify do servidor oficial.", "success");
+    } else if (action === "copy") {
+      await copyTextToClipboard(els.verificationPrimary.dataset.code || "");
+      setVerificationFeedback("Código copiado.", "success");
+    }
+  } catch (error) {
+    setVerificationFeedback(error.message || "Não foi possível continuar a verificação.", "error");
+  }
+});
 document.addEventListener("click", async (event) => {
   const target = event.target instanceof Element ? event.target : event.target?.parentElement;
   if (!target) return;
@@ -731,7 +954,10 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closePostMenus();
+  if (event.key === "Escape") {
+    closePostMenus();
+    if (!els.verificationModal.hidden) closeVerificationModal();
+  }
 });
 
 els.openComposer.addEventListener("click", () => {
@@ -753,6 +979,8 @@ async function init() {
     return false;
   });
   if (!canRender) return;
+
+  await completeDiscordConnectionFromCallback();
 
   setPublishing(true, "Carregando...");
   renderFeedLoading();

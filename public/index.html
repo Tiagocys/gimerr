@@ -112,6 +112,23 @@
     </main>
   </div>
 
+  <div class="modal-backdrop" id="verification-modal" hidden>
+    <section class="verification-modal" role="dialog" aria-modal="true" aria-labelledby="verification-title">
+      <div class="modal-head">
+        <h2 id="verification-title">Verifique sua conta para publicar</h2>
+      </div>
+      <p class="verification-copy">
+        Para proteger a comunidade contra spam, apenas contas verificadas pelo Discord podem publicar no Gimerr.
+      </p>
+      <div class="verification-steps" id="verification-steps"></div>
+      <p class="field-feedback" id="verification-feedback" role="status"></p>
+      <div class="modal-actions">
+        <button class="text-button" id="verification-close" type="button">Agora não</button>
+        <button class="primary-button" id="verification-primary" type="button">Verificar com Discord</button>
+      </div>
+    </section>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="./auth-client.js" defer></script>
   <script src="./user-search.js" defer></script>

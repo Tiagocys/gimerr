@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <title>Verificar conta | Gimerr</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body class="auth-page">
+  <main class="auth-layout auth-layout-clean">
+    <section class="auth-brand-panel" aria-labelledby="verify-title">
+      <a class="auth-brand" href="/" aria-label="Gimerr">
+        <img class="brand-logo" src="/assets/logo.png" width="280" height="66" alt="Gimerr">
+      </a>
+      <h1 class="auth-slogan" id="verify-title">Verifique sua conta para publicar.</h1>
+    </section>
+
+    <section class="auth-card" aria-labelledby="verify-card-title">
+      <div class="auth-form-heading">
+        <h2 id="verify-card-title">Verificação pelo Discord</h2>
+        <p>Entre com o mesmo Discord usado no servidor oficial do Gimerr.</p>
+      </div>
+
+      <div class="verification-steps">
+        <div class="verification-step">
+          <strong>1. Discord do servidor</strong>
+          <span>O botão no canal #verify já identificou seu Discord.</span>
+        </div>
+        <div class="verification-step">
+          <strong>2. Login no Gimerr</strong>
+          <span>Use o Discord para confirmar que é a mesma conta.</span>
+        </div>
+        <div class="verification-step">
+          <strong>3. Publicação liberada</strong>
+          <span>Depois da confirmação, sua conta fica liberada para postar.</span>
+        </div>
+      </div>
+
+      <div class="oauth-button-list">
+        <button class="oauth-button discord-button" id="discord-verify-auth" type="button">
+          <img src="/assets/discord.svg" width="20" height="20" alt="">
+          <span>Continuar com Discord</span>
+        </button>
+        <a class="primary-button" id="discord-verify-home" href="/" hidden>Ir para o feed</a>
+      </div>
+
+      <p class="auth-feedback" id="discord-verify-feedback" role="status"></p>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/auth-client.js"></script>
+  <script src="/discord-verify.js" defer></script>
+</body>
+</html>

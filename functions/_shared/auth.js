@@ -10,7 +10,9 @@ export function jsonResponse(body, init = {}) {
 }
 
 export function getSupabaseUrl(env) {
-  return (env.SUPABASE_URL || env.SUPABASE_API_URL || env.SUBABASE_API_URL || "").replace(/\/rest\/v1\/?$/, "");
+  const explicitUrl = env.SUPABASE_URL || env.SUPABASE_API_URL || env.SUBABASE_API_URL;
+  const derivedUrl = env.SUPABASE_PROJECT_ID ? `https://${env.SUPABASE_PROJECT_ID}.supabase.co` : "";
+  return (explicitUrl || derivedUrl || "").replace(/\/rest\/v1\/?$/, "");
 }
 
 export function getSupabaseRestUrl(env) {

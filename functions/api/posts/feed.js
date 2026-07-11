@@ -13,6 +13,7 @@ function toPublicPost(row) {
     originalMediaUrl: row.original_media_url,
     readyMediaUrl: row.ready_media_url,
     videoThumbnailUrl: row.video_thumbnail_url,
+    commentCount: Number(row.comment_count || 0),
     processingError: row.processing_error,
     createdAt: row.created_at,
     author: {
@@ -30,15 +31,27 @@ function toPublicPost(row) {
   };
 }
 
+function cleanNumber(value, fallback, { min = 0, max = 20 } = {}) {
+  const number = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
 export async function onRequestGet({ request, env }) {
   try {
     const auth = await requireAuthUser(request, env);
     if (auth.error) return auth.error;
 
+    const requestUrl = new URL(request.url);
+    const limit = cleanNumber(requestUrl.searchParams.get("limit"), 10, { min: 1, max: 15 });
+    const offset = cleanNumber(requestUrl.searchParams.get("offset"), 0, { min: 0, max: 5000 });
+    const fetchLimit = limit + 1;
+
     const url = new URL(`${getSupabaseRestUrl(env)}/public_feed_posts`);
     url.searchParams.set("select", "*");
     url.searchParams.set("order", "created_at.desc");
-    url.searchParams.set("limit", "50");
+    url.searchParams.set("limit", String(fetchLimit));
+    if (offset > 0) url.searchParams.set("offset", String(offset));
 
     const response = await fetch(url.toString(), {
       headers: getServiceHeaders(env),
@@ -46,7 +59,12 @@ export async function onRequestGet({ request, env }) {
     const rows = await response.json().catch(() => []);
     if (!response.ok) throw new Error(rows.message || "Não foi possível carregar o feed.");
 
-    return jsonResponse({ posts: rows.map(toPublicPost) });
+    const hasMore = rows.length > limit;
+    return jsonResponse({
+      posts: rows.slice(0, limit).map(toPublicPost),
+      hasMore,
+      nextOffset: offset + Math.min(rows.length, limit),
+    });
   } catch (error) {
     console.error("post feed failed", error);
     return jsonResponse({ error: error?.message || "Falha ao carregar feed." }, { status: 500 });

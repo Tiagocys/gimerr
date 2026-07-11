@@ -3,6 +3,7 @@
   let configPromise = null;
   let scriptPromise = null;
   let videoCounter = 0;
+  let observer = null;
 
   function getConfig() {
     if (!configPromise) {
@@ -107,9 +108,11 @@
 
   async function initializeVideo(video) {
     if (!video || video.dataset.fluidState === "ready" || video.dataset.fluidState === "loading") return;
+    if (!video.isConnected) return;
     video.dataset.fluidState = "loading";
 
     const config = await getConfig();
+    if (!video.isConnected) return;
     if (!config?.enabled) {
       video.dataset.fluidState = "native";
       return;
@@ -117,8 +120,10 @@
 
     try {
       const fluidPlayer = await loadFluidPlayer();
+      if (!video.isConnected) return;
       ensureVideoSource(video);
       const id = ensureVideoId(video);
+      if (document.getElementById(id) !== video) return;
       const player = fluidPlayer(id, getPlayerOptions(config, video));
       video.addEventListener("error", () => {
         if (video.dataset.fluidFallbackRestored) return;
@@ -131,14 +136,39 @@
       video.dataset.fluidState = "ready";
       video.gimerrFluidPlayer = player;
     } catch (error) {
+      if (!video.isConnected) return;
       video.dataset.fluidState = "failed";
       console.warn("Não foi possível inicializar Fluid Player.", error);
     }
   }
 
+  function getObserver() {
+    if (!("IntersectionObserver" in window)) return null;
+    if (observer) return observer;
+    observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        observer.unobserve(entry.target);
+        initializeVideo(entry.target);
+      });
+    }, {
+      rootMargin: "360px 0px",
+      threshold: 0.01,
+    });
+    return observer;
+  }
+
   function bindLazyInitialization(video) {
     if (!video || video.dataset.fluidBound) return;
     video.dataset.fluidBound = "true";
+    video.addEventListener("pointerdown", () => initializeVideo(video), { once: true });
+    video.addEventListener("focus", () => initializeVideo(video), { once: true });
+    const lazyObserver = getObserver();
+    if (lazyObserver) {
+      lazyObserver.observe(video);
+    } else {
+      window.setTimeout(() => initializeVideo(video), 0);
+    }
   }
 
   function prepare(root = document) {
@@ -150,7 +180,6 @@
         loadFluidPlayer().catch((error) => {
           console.warn("Não foi possível pré-carregar Fluid Player.", error);
         });
-        videos.forEach(initializeVideo);
       }
     });
   }
@@ -159,6 +188,16 @@
     prepare,
     initializeVideo,
   };
+
+  document.addEventListener("pointerdown", (event) => {
+    const video = event.target instanceof Element ? event.target.closest("video[data-fluid-video]") : null;
+    if (video) initializeVideo(video);
+  }, { capture: true });
+
+  document.addEventListener("focusin", (event) => {
+    const video = event.target instanceof Element ? event.target.closest("video[data-fluid-video]") : null;
+    if (video) initializeVideo(video);
+  });
 
   document.addEventListener("DOMContentLoaded", () => prepare(document));
 })();

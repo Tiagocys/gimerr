@@ -61,12 +61,8 @@
         </div>
 
         <section class="composer" id="composer">
-          <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação">
-            <button class="tab-button is-active" type="button" data-post-type="post">Imagem</button>
-            <button class="tab-button" type="button" data-post-type="video">Vídeo</button>
-            <button class="tab-button" type="button" data-post-type="listing">Anúncio</button>
-          </div>
-          <textarea id="composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, venda um item ou chame a comunidade para jogar."></textarea>
+          <textarea id="composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser."></textarea>
+          <div class="composer-mention-suggestions" id="composer-mention-suggestions" hidden></div>
           <div class="composer-media" id="composer-media" hidden>
             <span id="composer-file-name"></span>
             <button class="text-button" id="composer-clear-file" type="button">Remover</button>

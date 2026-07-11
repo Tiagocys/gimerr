@@ -9,6 +9,7 @@ function getToken() {
 }
 
 function setFeedback(message, tone = "") {
+  if (!feedback) return;
   feedback.textContent = message || "";
   feedback.className = `auth-feedback${tone ? ` is-${tone}` : ""}`;
 }
@@ -17,7 +18,8 @@ function setLoading(isLoading, label = "Verificando...") {
   if (!authButton) return;
   authButton.disabled = isLoading;
   authButton.classList.toggle("is-loading", isLoading);
-  authButton.querySelector("span").textContent = isLoading ? label : "Continuar com Discord";
+  const labelEl = authButton.querySelector("span");
+  if (labelEl) labelEl.textContent = isLoading ? label : "Continuar com Discord";
 }
 
 function redirectToFeedSoon() {
@@ -63,8 +65,8 @@ async function completeVerification() {
     const { data } = await window.GimerrAuth.getSession();
     if (!data.session) {
       setLoading(false);
-      title.textContent = "Confirme seu Discord.";
-      summary.textContent = "Entre com o mesmo Discord usado no servidor oficial do Gimerr.";
+      if (title) title.textContent = "Confirme seu Discord.";
+      if (summary) summary.textContent = "Entre com o mesmo Discord usado no servidor oficial do Gimerr.";
       setFeedback("Entre com Discord para concluir a verificação.");
       return;
     }
@@ -88,8 +90,8 @@ async function completeVerification() {
       throw new Error(payload.error || "Não foi possível concluir a verificação.");
     }
 
-    title.textContent = "Sua conta foi verificada.";
-    summary.textContent = "Você será redirecionado para o Gimerr em instantes...";
+    if (title) title.textContent = "Sua conta foi verificada.";
+    if (summary) summary.textContent = "Você será redirecionado para o Gimerr em instantes...";
     setFeedback("", "success");
     if (actions) {
       actions.hidden = true;

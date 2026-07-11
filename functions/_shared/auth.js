@@ -258,7 +258,7 @@ async function getAuthenticatedProfileAccess(env, userId) {
   if (!serviceKey) return null;
 
   const url = new URL(`${getSupabaseRestUrl(env)}/profiles`);
-  url.searchParams.set("select", "id,status,suspended_until");
+  url.searchParams.set("select", "id,status,suspended_until,display_name,username,avatar_url");
   url.searchParams.set("id", `eq.${userId}`);
   url.searchParams.set("limit", "1");
   const headers = {

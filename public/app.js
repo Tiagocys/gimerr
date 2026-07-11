@@ -5,13 +5,32 @@ const DISCORD_INVITE_FALLBACK = "https://discord.gg/tCPVFu6juS";
 const state = {
   filter: "all",
   search: "",
-  postType: "post",
   signedIn: false,
   session: null,
   followedGames: [],
+  followedProfiles: [],
   liveUpdates: [],
   preparedMediaFile: null,
+  feedLoading: false,
+  feedHasMore: true,
+  feedOffset: 0,
+  feedPageSize: 8,
+  activeCommentPostId: "",
+  activeCommentsPostId: "",
+  commentSubmittingPostId: "",
+  commentsLoadingPostId: "",
+  commentsByPost: {},
+  commentsErrorByPost: {},
+  mention: {
+    active: false,
+    start: -1,
+    end: -1,
+    selectedIndex: 0,
+    items: [],
+  },
 };
+
+let feedObserver = null;
 
 const els = {
   followedGamesPanel: document.querySelector("#followed-games-panel"),
@@ -22,8 +41,8 @@ const els = {
   liveStack: document.querySelector("#live-stack"),
   search: document.querySelector("#global-search"),
   filterButtons: document.querySelectorAll(".filter-chip"),
-  tabButtons: document.querySelectorAll(".tab-button"),
   composerText: document.querySelector("#composer-text"),
+  composerMentionSuggestions: document.querySelector("#composer-mention-suggestions"),
   composerServer: document.querySelector("#composer-server"),
   composerFile: document.querySelector("#composer-file"),
   composerMedia: document.querySelector("#composer-media"),
@@ -76,6 +95,16 @@ function normalizeFollowedGame(row) {
   };
 }
 
+function normalizeFollowedProfile(profile) {
+  if (!profile?.id || !profile.username) return null;
+  return {
+    id: profile.id,
+    displayName: profile.display_name || profile.username || "Usuário Gimerr",
+    username: profile.username,
+    avatarUrl: profile.avatar_url || "",
+  };
+}
+
 function getGame(gameId) {
   return state.followedGames.find((game) => String(game.id) === String(gameId)) || null;
 }
@@ -87,10 +116,159 @@ function getGameUrl(game) {
     : `./game?id=${encodeURIComponent(game.id)}`;
 }
 
-function typeLabel(type) {
-  if (type === "video") return "Vídeo";
-  if (type === "listing") return "Marketplace";
-  return "Imagem";
+function getProfileUrl(profile) {
+  if (profile?.username) return `./profile?u=${encodeURIComponent(profile.username)}`;
+  if (profile?.id) return `./profile?id=${encodeURIComponent(profile.id)}`;
+  return "./profile";
+}
+
+function extractMentionUsernames(text, authorUsername = "") {
+  const mentions = [];
+  const seen = new Set();
+  const author = String(authorUsername || "").toLowerCase();
+  const pattern = /(^|[\s([{"'“‘])@([a-z0-9_.]{3,24})(?=$|[\s),.!?:;}"'”’\]])/gi;
+  let match;
+  while ((match = pattern.exec(String(text || "")))) {
+    const username = match[2].replace(/\.+$/, "");
+    const key = username.toLowerCase();
+    if (!username || key === author || seen.has(key)) continue;
+    seen.add(key);
+    mentions.push(username);
+  }
+  return mentions;
+}
+
+function renderMentionLine(authorName, post) {
+  const mentions = extractMentionUsernames(post?.body, post?.author?.username);
+  if (!mentions.length) return "";
+  const links = mentions.map((username) => (
+    `<a href="./profile?u=${encodeURIComponent(username)}">@${escapeHtml(username)}</a>`
+  )).join(", ");
+  return `<p class="post-mention-line"><strong>${escapeHtml(authorName)}</strong> está com ${links}</p>`;
+}
+
+function renderTextWithMentions(text, authorUsername = "") {
+  const value = String(text || "");
+  const author = String(authorUsername || "").toLowerCase();
+  const pattern = /(^|[\s([{"'“‘])@([a-z0-9_.]{3,24})(?=$|[\s),.!?:;}"'”’\]])/gi;
+  let output = "";
+  let lastIndex = 0;
+  let match;
+
+  while ((match = pattern.exec(value))) {
+    const username = match[2].replace(/\.+$/, "");
+    const key = username.toLowerCase();
+    const atIndex = match.index + match[1].length;
+    output += escapeHtml(value.slice(lastIndex, atIndex));
+    if (key && key !== author) {
+      output += `<a class="inline-mention" href="./profile?u=${encodeURIComponent(username)}">@${escapeHtml(username)}</a>`;
+    } else {
+      output += escapeHtml(`@${username}`);
+    }
+    lastIndex = atIndex + username.length + 1;
+  }
+
+  output += escapeHtml(value.slice(lastIndex));
+  return output;
+}
+
+function getActiveMention(text, cursor) {
+  const beforeCursor = String(text || "").slice(0, cursor);
+  const match = beforeCursor.match(/(^|[\s([{"'“‘])@([a-z0-9_.]{1,24})$/i);
+  if (!match) return null;
+  const query = match[2] || "";
+  if (!query) return null;
+  return {
+    start: beforeCursor.length - query.length - 1,
+    end: cursor,
+    query: query.toLowerCase(),
+  };
+}
+
+function getMentionMatches(query) {
+  if (!query) return [];
+  const normalized = query.toLowerCase();
+  return state.followedProfiles
+    .filter((profile) => {
+      const username = String(profile.username || "").toLowerCase();
+      const displayName = String(profile.displayName || "").toLowerCase();
+      return username.startsWith(normalized) || displayName.startsWith(normalized);
+    })
+    .slice(0, 6);
+}
+
+function closeMentionSuggestions() {
+  state.mention = {
+    active: false,
+    start: -1,
+    end: -1,
+    selectedIndex: 0,
+    items: [],
+  };
+  if (els.composerMentionSuggestions) {
+    els.composerMentionSuggestions.hidden = true;
+    els.composerMentionSuggestions.innerHTML = "";
+  }
+}
+
+function renderMentionSuggestions() {
+  const container = els.composerMentionSuggestions;
+  if (!container) return;
+  if (!state.mention.active || !state.mention.items.length) {
+    closeMentionSuggestions();
+    return;
+  }
+
+  container.hidden = false;
+  container.innerHTML = state.mention.items.map((profile, index) => `
+    <button class="composer-mention-option${index === state.mention.selectedIndex ? " is-active" : ""}" type="button" data-mention-index="${index}">
+      <span class="user-search-avatar">
+        <img src="${escapeHtml(profile.avatarUrl || "./assets/avatar.svg")}" alt="">
+      </span>
+      <span class="composer-mention-copy">
+        <strong>${escapeHtml(profile.displayName)}</strong>
+        <span>@${escapeHtml(profile.username)}</span>
+      </span>
+    </button>
+  `).join("");
+}
+
+function updateMentionSuggestions() {
+  if (!els.composerText) return;
+  const cursor = els.composerText.selectionStart;
+  const activeMention = getActiveMention(els.composerText.value, cursor);
+  if (!activeMention) {
+    closeMentionSuggestions();
+    return;
+  }
+
+  const items = getMentionMatches(activeMention.query);
+  if (!items.length) {
+    closeMentionSuggestions();
+    return;
+  }
+
+  state.mention = {
+    active: true,
+    start: activeMention.start,
+    end: activeMention.end,
+    selectedIndex: Math.min(state.mention.selectedIndex || 0, items.length - 1),
+    items,
+  };
+  renderMentionSuggestions();
+}
+
+function insertMention(profile) {
+  if (!profile || !state.mention.active) return;
+  const text = els.composerText.value;
+  const before = text.slice(0, state.mention.start);
+  const after = text.slice(state.mention.end);
+  const nextValue = `${before}@${profile.username} ${after}`;
+  const nextCursor = before.length + profile.username.length + 2;
+  els.composerText.value = nextValue.slice(0, Number(els.composerText.maxLength || 220));
+  closeMentionSuggestions();
+  els.composerText.focus();
+  els.composerText.setSelectionRange(nextCursor, nextCursor);
 }
 
 function isMobileVideoUploadDevice() {
@@ -123,26 +301,24 @@ function logVideoStage(stage, details = {}) {
   });
 }
 
-function getComposerAccept(type = state.postType) {
-  return type === "video"
-    ? "video/mp4,video/webm,video/quicktime"
-    : "image/jpeg,image/png,image/webp,image/gif";
+function getComposerAccept() {
+  return "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
 }
 
-function validateComposerFile(file, type = state.postType) {
+function getPostTypeFromFile(file) {
+  if (isVideoFile(file)) return "video";
+  return "post";
+}
+
+function validateComposerFile(file) {
   if (!file) return true;
-  if (type === "video") {
+  if (isVideoFile(file)) {
     logVideoStage("validating-file", {
       name: file.name,
       type: file.type,
       size: formatFileSize(file.size),
       userAgent: navigator.userAgent,
     });
-    if (!isVideoFile(file)) {
-      logVideoStage("validation-failed", { reason: "not-video", type: file.type });
-      window.alert("Selecione um arquivo de vídeo para publicar na aba Vídeo.");
-      return false;
-    }
     if (isMobileVideoUploadDevice()) {
       logVideoStage("validation-failed", { reason: "mobile-device" });
       window.alert("O upload de vídeos pode ser feito apenas através de um PC/Mac.");
@@ -153,7 +329,7 @@ function validateComposerFile(file, type = state.postType) {
   }
 
   if (!isImageFile(file)) {
-    window.alert("Selecione uma imagem para publicar nesta aba.");
+    window.alert("Selecione uma imagem JPG, PNG, WebP, GIF ou um vídeo MP4, WebM ou MOV.");
     return false;
   }
   return true;
@@ -187,7 +363,6 @@ function renderPostMenu(post) {
         <span aria-hidden="true">&#8942;</span>
       </button>
       <div class="post-menu-popover" hidden>
-        <button type="button" data-post-share data-post-id="${postId}">Compartilhar</button>
         ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
         ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Apagar post</button>` : ""}
       </div>
@@ -436,6 +611,190 @@ async function sharePost(postId) {
   window.alert("Link copiado.");
 }
 
+function formatCommentCount(value) {
+  const count = Number(value || 0);
+  if (count === 0) return "0 comentários";
+  if (count === 1) return "1 comentário";
+  return `${new Intl.NumberFormat("pt-BR").format(count)} comentários`;
+}
+
+function renderPostActions(post) {
+  const postId = escapeHtml(post.id);
+  return `
+    <div class="post-action-bar">
+      <div class="post-comment-action">
+        <button class="post-action-button" type="button" data-post-comment-toggle data-post-id="${postId}">
+          Comentar
+        </button>
+        <button class="post-comment-count" type="button" data-post-comments-toggle data-post-id="${postId}">
+          ${escapeHtml(formatCommentCount(post.commentCount))}
+        </button>
+      </div>
+      <button class="post-action-button" type="button" data-post-share data-post-id="${postId}">
+        Compartilhar
+      </button>
+    </div>
+    ${renderInlineCommentsPanel(post)}
+    ${renderInlineCommentForm(post)}
+  `;
+}
+
+function renderInlineCommentItem(comment) {
+  const author = comment.author || {};
+  const authorName = author.displayName || "Usuário Gimerr";
+  const authorHandle = author.username ? `@${author.username}` : "";
+  return `
+    <article class="comment-item inline-comment-item">
+      <a class="post-avatar" href="${getProfileUrl(author)}">
+        <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
+      </a>
+      <div class="comment-copy">
+        <div class="comment-meta">
+          <a href="${getProfileUrl(author)}">${escapeHtml(authorName)}</a>
+          <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
+        </div>
+        <p>${renderTextWithMentions(comment.body, author.username)}</p>
+      </div>
+    </article>
+  `;
+}
+
+function renderInlineCommentsPanel(post) {
+  const postId = String(post.id || "");
+  if (String(state.activeCommentsPostId) !== postId) return "";
+
+  const commentState = state.commentsByPost[postId] || { items: [], hasMore: false, nextOffset: 0 };
+  const isLoading = String(state.commentsLoadingPostId) === postId;
+  const error = state.commentsErrorByPost[postId] || "";
+  const comments = commentState.items || [];
+  const body = error
+    ? `<p class="comments-empty">${escapeHtml(error)}</p>`
+    : comments.length
+      ? comments.map(renderInlineCommentItem).join("")
+      : `<p class="comments-empty">${isLoading ? "Carregando comentários..." : "Nenhum comentário ainda."}</p>`;
+  const moreButton = commentState.hasMore
+    ? `<button class="text-button inline-comments-more" type="button" data-post-comments-more data-post-id="${escapeHtml(postId)}" ${isLoading ? "disabled" : ""}>${isLoading ? "Carregando..." : "Ver mais comentários"}</button>`
+    : "";
+
+  return `
+    <div class="inline-comments-panel">
+      <div class="comments-list">
+        ${body}
+      </div>
+      ${moreButton}
+    </div>
+  `;
+}
+
+async function loadInlineComments(postId, { append = false } = {}) {
+  const id = String(postId || "");
+  if (!id || state.commentsLoadingPostId) return;
+
+  const current = state.commentsByPost[id] || { items: [], hasMore: false, nextOffset: 0 };
+  const offset = append ? Number(current.nextOffset || current.items?.length || 0) : 0;
+  state.commentsLoadingPostId = id;
+  state.commentsErrorByPost[id] = "";
+  renderFeed({ prepareVideos: false });
+
+  try {
+    const response = await fetch(`/api/posts/comments?postId=${encodeURIComponent(id)}&limit=3&offset=${offset}`, {
+      headers: { accept: "application/json" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível carregar comentários.");
+
+    state.commentsByPost[id] = {
+      items: append ? [...(current.items || []), ...(payload.comments || [])] : (payload.comments || []),
+      hasMore: Boolean(payload.hasMore),
+      nextOffset: Number(payload.nextOffset || 0),
+    };
+  } catch (error) {
+    state.commentsErrorByPost[id] = error.message || "Não foi possível carregar comentários.";
+  } finally {
+    state.commentsLoadingPostId = "";
+    renderFeed({ prepareVideos: false });
+  }
+}
+
+function renderInlineCommentForm(post) {
+  if (String(state.activeCommentPostId) !== String(post.id)) return "";
+  if (!state.session?.access_token) {
+    return `<a class="text-button inline-comment-login" href="./sign-in.html">Entre para comentar</a>`;
+  }
+  const isSubmitting = String(state.commentSubmittingPostId) === String(post.id);
+  return `
+    <form class="inline-comment-form" data-inline-comment-form data-post-id="${escapeHtml(post.id)}">
+      <textarea maxlength="500" rows="2" placeholder="Escreva um comentário"></textarea>
+      <div class="inline-comment-actions">
+        <span>Até 500 caracteres.</span>
+        <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>
+          ${isSubmitting ? "Comentando..." : "Comentar"}
+        </button>
+      </div>
+      <p class="field-feedback" data-inline-comment-feedback></p>
+    </form>
+  `;
+}
+
+async function submitInlineComment(form) {
+  const postId = form.dataset.postId || "";
+  const textarea = form.querySelector("textarea");
+  const feedback = form.querySelector("[data-inline-comment-feedback]");
+  const body = textarea?.value?.trim() || "";
+  if (!postId || !body || state.commentSubmittingPostId) {
+    textarea?.focus();
+    return;
+  }
+
+  state.commentSubmittingPostId = postId;
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Comentando...";
+  }
+
+  try {
+    const response = await fetch("/api/posts/comments", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${state.session.access_token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ postId, body }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível comentar.");
+
+    posts = posts.map((post) => (
+      String(post.id) === String(postId)
+        ? { ...post, commentCount: Number(post.commentCount || 0) + 1 }
+        : post
+    ));
+    if (state.commentsByPost[postId]?.items) {
+      state.commentsByPost[postId] = {
+        ...state.commentsByPost[postId],
+        items: [...state.commentsByPost[postId].items, payload.comment].filter(Boolean),
+        nextOffset: Number(state.commentsByPost[postId].nextOffset || 0) + 1,
+      };
+    }
+    state.activeCommentPostId = "";
+  } catch (error) {
+    state.activeCommentPostId = postId;
+    if (feedback) {
+      feedback.textContent = error.message || "Não foi possível comentar.";
+      feedback.className = "field-feedback is-error";
+    }
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = "Comentar";
+    }
+  } finally {
+    state.commentSubmittingPostId = "";
+    if (String(state.activeCommentPostId) !== String(postId)) renderFeed({ prepareVideos: false });
+  }
+}
+
 async function deletePost(postId) {
   if (!state.session?.access_token) return;
   const confirmed = window.confirm("Apagar este post? Essa ação também remove a mídia enviada.");
@@ -482,7 +841,8 @@ async function loadFollowedGames() {
     .from("game_follows")
     .select("created_at, game:igdb_games(igdb_id, name, slug, cover_url)")
     .eq("profile_id", state.session.user.id)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(30);
 
   if (error) throw error;
   state.followedGames = (data || [])
@@ -490,16 +850,62 @@ async function loadFollowedGames() {
     .filter((game) => game.id);
 }
 
-async function loadFeedPosts() {
-  const response = await fetch("/api/posts/feed", {
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${state.session.access_token}`,
-    },
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Não foi possível carregar o feed.");
-  posts = payload.posts || [];
+async function loadFollowedProfiles() {
+  const client = await window.GimerrAuth.getClient();
+  const { data: follows, error: followsError } = await client
+    .from("user_follows")
+    .select("following_id")
+    .eq("follower_id", state.session.user.id)
+    .order("created_at", { ascending: false })
+    .limit(80);
+
+  if (followsError) throw followsError;
+
+  const followedIds = [...new Set((follows || [])
+    .map((row) => row.following_id)
+    .filter(Boolean))];
+
+  if (!followedIds.length) {
+    state.followedProfiles = [];
+    return;
+  }
+
+  const { data: profiles, error: profilesError } = await client
+    .from("public_profiles")
+    .select("id, display_name, username, avatar_url")
+    .in("id", followedIds);
+
+  if (profilesError) throw profilesError;
+
+  const byId = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  state.followedProfiles = followedIds
+    .map((id) => normalizeFollowedProfile(byId.get(id)))
+    .filter(Boolean);
+}
+
+async function loadFeedPosts({ append = false } = {}) {
+  if (state.feedLoading) return;
+  const offset = append ? state.feedOffset : 0;
+  state.feedLoading = true;
+  try {
+    const response = await fetch(`/api/posts/feed?limit=${state.feedPageSize}&offset=${offset}`, {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${state.session.access_token}`,
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (!append) posts = [];
+      throw new Error(payload.error || "Não foi possível carregar o feed.");
+    }
+    const nextPosts = payload.posts || [];
+    posts = append ? [...posts, ...nextPosts] : nextPosts;
+    state.feedHasMore = Boolean(payload.hasMore);
+    state.feedOffset = Number(payload.nextOffset || posts.length);
+  } finally {
+    state.feedLoading = false;
+  }
 }
 
 function setComposerAvailability() {
@@ -518,7 +924,7 @@ function setComposerAvailability() {
     return;
   }
 
-  els.composerText.placeholder = "Compartilhe uma jogada, venda um item ou chame a comunidade para jogar.";
+  els.composerText.placeholder = "Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser.";
   els.composerServer.innerHTML = state.followedGames.map((game) => `
     <option value="${escapeHtml(game.id)}">${escapeHtml(game.name)}</option>
   `).join("");
@@ -586,7 +992,7 @@ function withTimeout(promise, timeoutMs, message) {
   ]);
 }
 
-function renderFeed() {
+function renderFeed({ prepareVideos = true } = {}) {
   const followedIds = new Set(state.followedGames.map((game) => String(game.id)));
   const query = state.search.trim().toLowerCase();
   const filtered = posts.filter((post) => {
@@ -603,12 +1009,27 @@ function renderFeed() {
     return matchesScope && matchesType && matchesSearch;
   });
 
-  if (!filtered.length) {
-    els.feedList.innerHTML = `<div class="post-card empty-state">Nada novo por aqui.</div>`;
+  if (!filtered.length && state.feedLoading) {
+    renderFeedLoading();
     return;
   }
 
-  els.feedList.innerHTML = filtered.map((post) => {
+  if (!filtered.length) {
+    const loaderHtml = state.feedHasMore
+      ? `
+        <div class="post-card empty-state">
+          Nenhum post neste filtro por enquanto.
+          <button class="text-button" type="button" data-feed-load-more ${state.feedLoading ? "disabled" : ""}>
+            ${state.feedLoading ? "Carregando..." : "Carregar mais posts"}
+          </button>
+        </div>
+      `
+      : `<div class="post-card empty-state">Nada novo por aqui.</div>`;
+    els.feedList.innerHTML = loaderHtml;
+    return;
+  }
+
+  const feedHtml = filtered.map((post) => {
     const game = post.game || getGame(post.gameId);
     const author = post.author || {};
     const authorName = author.displayName || "Usuário Gimerr";
@@ -622,8 +1043,9 @@ function renderFeed() {
       <article class="post-card">
         ${media}
         <div class="post-body">
+          ${renderMentionLine(authorName, post)}
           <div class="post-meta">
-            <div class="author-block">
+            <a class="author-block" href="${getProfileUrl(author)}">
               <div class="post-avatar">
                 <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
               </div>
@@ -631,24 +1053,59 @@ function renderFeed() {
                 <strong>${escapeHtml(authorName)}</strong>
                 <span>${escapeHtml(authorHandle)} · ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
               </div>
-            </div>
+            </a>
             <div class="post-card-tools">
               ${renderPostMenu(post)}
             </div>
           </div>
           <div>
-            <h3 class="post-title">${typeLabel(post.type)}</h3>
             ${post.body ? `<p class="post-text">${escapeHtml(post.body)}</p>` : ""}
           </div>
           <a class="channel-line" href="${getGameUrl(game)}">
             <span class="channel-dot" aria-hidden="true"></span>
             <span>${escapeHtml(game?.name || "Game")}</span>
           </a>
+          ${renderPostActions(post)}
         </div>
       </article>
     `;
   }).join("");
-  window.GimerrVideoPlayer?.prepare(els.feedList);
+  const loaderHtml = state.feedHasMore
+    ? `
+      <div class="feed-pagination" data-feed-sentinel>
+        <button class="text-button" type="button" data-feed-load-more ${state.feedLoading ? "disabled" : ""}>
+          ${state.feedLoading ? "Carregando mais posts..." : "Carregar mais posts"}
+        </button>
+      </div>
+    `
+    : "";
+  els.feedList.innerHTML = `${feedHtml}${loaderHtml}`;
+  if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
+  observeFeedSentinel();
+}
+
+function observeFeedSentinel() {
+  if (feedObserver) feedObserver.disconnect();
+  const sentinel = els.feedList.querySelector("[data-feed-sentinel]");
+  if (!sentinel || !state.feedHasMore) return;
+  if (!("IntersectionObserver" in window)) return;
+
+  feedObserver = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    loadMoreFeedPosts().catch((error) => {
+      console.warn("Não foi possível carregar mais posts.", error);
+    });
+  }, {
+    rootMargin: "900px 0px",
+    threshold: 0.01,
+  });
+  feedObserver.observe(sentinel);
+}
+
+async function loadMoreFeedPosts() {
+  if (state.feedLoading || !state.feedHasMore) return;
+  await loadFeedPosts({ append: true });
+  renderFeed();
 }
 
 function setFilter(nextFilter) {
@@ -659,21 +1116,9 @@ function setFilter(nextFilter) {
   renderFeed();
 }
 
-function setPostType(nextType) {
-  state.postType = nextType;
-  els.composerFile.accept = getComposerAccept(nextType);
-  els.tabButtons.forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.postType === nextType);
-  });
-  const [file] = els.composerFile.files;
-  if (file && !validateComposerFile(file, nextType)) {
-    clearComposerFile();
-  }
-}
-
 async function prepareComposerUploadFile(file, type) {
   if (!file) return null;
-  if (!validateComposerFile(file, type)) return null;
+  if (!validateComposerFile(file)) return null;
   if (type === "video") {
     logVideoStage("client-compression-skipped", {
       reason: "server-worker-enabled",
@@ -787,7 +1232,7 @@ async function publishPost() {
   const game = getGame(els.composerServer.value);
   if (!game) return;
 
-  const type = state.postType;
+  const type = file ? getPostTypeFromFile(file) : "post";
   try {
     const preparedFile = await prepareComposerUploadFile(file, type);
     if (file && !preparedFile) return;
@@ -797,6 +1242,8 @@ async function publishPost() {
     await createFeedPost({ game, type, text, uploadedMedia });
     els.composerText.value = "";
     clearComposerFile();
+    state.feedOffset = 0;
+    state.feedHasMore = true;
     await loadFeedPosts();
     renderFeed();
   } catch (error) {
@@ -843,13 +1290,45 @@ els.filterButtons.forEach((button) => {
   button.addEventListener("click", () => setFilter(button.dataset.filter));
 });
 
-els.tabButtons.forEach((button) => {
-  button.addEventListener("click", () => setPostType(button.dataset.postType));
-});
-
 els.search.addEventListener("input", (event) => {
   state.search = event.target.value;
   renderFeed();
+});
+
+els.composerText.addEventListener("input", updateMentionSuggestions);
+els.composerText.addEventListener("click", updateMentionSuggestions);
+els.composerText.addEventListener("keyup", (event) => {
+  if (["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(event.key)) return;
+  updateMentionSuggestions();
+});
+els.composerText.addEventListener("keydown", (event) => {
+  if (!state.mention.active || !state.mention.items.length) return;
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    state.mention.selectedIndex = (state.mention.selectedIndex + 1) % state.mention.items.length;
+    renderMentionSuggestions();
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    state.mention.selectedIndex = (state.mention.selectedIndex - 1 + state.mention.items.length) % state.mention.items.length;
+    renderMentionSuggestions();
+  } else if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    insertMention(state.mention.items[state.mention.selectedIndex]);
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    closeMentionSuggestions();
+  }
+});
+
+els.composerMentionSuggestions?.addEventListener("mousedown", (event) => {
+  const button = event.target instanceof Element
+    ? event.target.closest("[data-mention-index]")
+    : null;
+  if (!button) return;
+  event.preventDefault();
+  const profile = state.mention.items[Number(button.dataset.mentionIndex || 0)];
+  insertMention(profile);
 });
 
 els.publishPost.addEventListener("click", publishPost);
@@ -930,6 +1409,45 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const commentToggle = target.closest("[data-post-comment-toggle]");
+  if (commentToggle) {
+    event.preventDefault();
+    const postId = commentToggle.dataset.postId || "";
+    state.activeCommentPostId = String(state.activeCommentPostId) === String(postId) ? "" : postId;
+    renderFeed({ prepareVideos: false });
+    window.setTimeout(() => {
+      document.querySelector(`[data-inline-comment-form][data-post-id="${CSS.escape(postId)}"] textarea`)?.focus();
+    });
+    return;
+  }
+
+  const commentsToggle = target.closest("[data-post-comments-toggle]");
+  if (commentsToggle) {
+    event.preventDefault();
+    const postId = commentsToggle.dataset.postId || "";
+    const willOpen = String(state.activeCommentsPostId) !== String(postId);
+    state.activeCommentsPostId = willOpen ? postId : "";
+    renderFeed({ prepareVideos: false });
+    if (willOpen && !state.commentsByPost[postId]) {
+      await loadInlineComments(postId);
+    }
+    return;
+  }
+
+  const commentsMoreButton = target.closest("[data-post-comments-more]");
+  if (commentsMoreButton) {
+    event.preventDefault();
+    await loadInlineComments(commentsMoreButton.dataset.postId || "", { append: true });
+    return;
+  }
+
+  const feedLoadMoreButton = target.closest("[data-feed-load-more]");
+  if (feedLoadMoreButton) {
+    event.preventDefault();
+    await loadMoreFeedPosts();
+    return;
+  }
+
   const deleteButton = target.closest("[data-post-delete]");
   if (deleteButton) {
     event.preventDefault();
@@ -946,11 +1464,23 @@ document.addEventListener("click", async (event) => {
   if (!target.closest("[data-post-menu]")) {
     closePostMenus();
   }
+
+  if (!target.closest("#composer")) {
+    closeMentionSuggestions();
+  }
+});
+
+document.addEventListener("submit", async (event) => {
+  const form = event.target instanceof Element ? event.target.closest("[data-inline-comment-form]") : null;
+  if (!form) return;
+  event.preventDefault();
+  await submitInlineComment(form);
 });
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closePostMenus();
+    closeMentionSuggestions();
     if (!els.verificationModal.hidden) closeVerificationModal();
   }
 });
@@ -963,6 +1493,8 @@ els.openComposer.addEventListener("click", () => {
 
 async function init() {
   if (redirectLegacySharedPostUrl()) return;
+
+  renderFeedLoading();
 
   const canRender = await withTimeout(
     hydrateAuthenticatedHome(),
@@ -978,29 +1510,37 @@ async function init() {
   await completeDiscordConnectionFromCallback();
 
   setPublishing(true, "Carregando...");
-  renderFeedLoading();
 
-  const [followedResult, feedResult] = await Promise.allSettled([
-    withTimeout(loadFollowedGames(), 15000, "A lista de games demorou mais que o esperado."),
-    withTimeout(loadFeedPosts(), 15000, "O feed demorou mais que o esperado."),
-  ]);
+  const followedPromise = withTimeout(loadFollowedGames(), 12000, "A lista de games demorou mais que o esperado.")
+    .catch((error) => {
+      console.warn("Não foi possível carregar games seguidos.", error);
+      state.followedGames = [];
+    })
+    .finally(() => {
+      renderFollowedGames();
+      renderLiveStack();
+      setComposerAvailability();
+      renderFeed({ prepareVideos: false });
+    });
 
-  if (followedResult.status === "rejected") {
-    const error = followedResult.reason;
-    console.warn("Não foi possível carregar games seguidos.", error);
-    state.followedGames = [];
-  }
+  const followedProfilesPromise = withTimeout(loadFollowedProfiles(), 12000, "A lista de perfis seguidos demorou mais que o esperado.")
+    .catch((error) => {
+      console.warn("Não foi possível carregar perfis seguidos.", error);
+      state.followedProfiles = [];
+    });
 
-  if (feedResult.status === "rejected") {
-    const error = feedResult.reason;
-    console.warn("Não foi possível carregar posts do feed.", error);
-    posts = [];
-  }
+  const feedPromise = withTimeout(loadFeedPosts(), 12000, "O feed demorou mais que o esperado.")
+    .then(() => {
+      renderFeed();
+    })
+    .catch((error) => {
+      console.warn("Não foi possível carregar posts do feed.", error);
+      posts = [];
+      state.feedHasMore = false;
+      renderFeed();
+    });
 
-  renderFollowedGames();
-  renderLiveStack();
-  setComposerAvailability();
-  renderFeed();
+  await Promise.allSettled([followedPromise, followedProfilesPromise, feedPromise]);
 }
 
 init();

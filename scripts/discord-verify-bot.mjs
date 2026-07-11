@@ -72,15 +72,27 @@ async function sendChannelMessage(channelId, content) {
   });
 }
 
+function getSignInUrl() {
+  const baseUrl = normalizeApiBase(
+    process.env.GIMERR_PUBLIC_URL
+      || process.env.GIMERR_URL
+      || process.env.GIMERR_API_BASE_URL
+      || (process.env.NODE_ENV === "production" ? process.env.GIMERR_URL_PAGES : "")
+      || "http://localhost:8788",
+  );
+  return `${baseUrl}/sign-in.html`;
+}
+
 async function sendVerifyButtonMessage(channelId) {
   return discordRequest(`/channels/${channelId}/messages`, {
     method: "POST",
     body: JSON.stringify({
       content: [
-        "**Verifique sua conta Gimerr**",
+        "**Getting Started**",
         "",
-        "Clique no botão abaixo para receber seu link seguro de autenticação no Gimerr.",
-        "Depois, entre com este mesmo Discord. A verificação usa o nível de segurança do servidor oficial.",
+        "To access Gimerr posting features, you need to verify your Gimerr account with Discord.",
+        "",
+        "Click a button below to get started:",
       ].join("\n"),
       components: [
         {
@@ -89,8 +101,14 @@ async function sendVerifyButtonMessage(channelId) {
             {
               type: 2,
               style: 1,
-              label: "Verify Gimerr Account",
+              label: "Verify with Gimerr",
               custom_id: VERIFY_BUTTON_CUSTOM_ID,
+            },
+            {
+              type: 2,
+              style: 5,
+              label: "Create a Gimerr account",
+              url: getSignInUrl(),
             },
           ],
         },

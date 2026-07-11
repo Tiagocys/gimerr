@@ -1,6 +1,6 @@
 const feedback = document.querySelector("#discord-verify-feedback");
 const authButton = document.querySelector("#discord-verify-auth");
-const homeButton = document.querySelector("#discord-verify-home");
+const actions = document.querySelector("#discord-verify-actions");
 const title = document.querySelector("#verify-title");
 const summary = document.querySelector("#discord-verify-summary");
 
@@ -21,8 +21,8 @@ function setLoading(isLoading, label = "Verificando...") {
 
 function redirectToFeedSoon() {
   window.setTimeout(() => {
-    window.location.assign("/");
-  }, 1800);
+    window.location.replace("/");
+  }, 2400);
 }
 
 async function signInWithDiscord() {
@@ -90,8 +90,7 @@ async function completeVerification() {
     title.textContent = "Sua conta foi verificada.";
     summary.textContent = "Você será redirecionado para o Gimerr em instantes...";
     setFeedback("", "success");
-    authButton.hidden = true;
-    homeButton.hidden = false;
+    actions.hidden = true;
     window.history.replaceState({}, document.title, `${window.location.origin}${window.location.pathname}`);
     redirectToFeedSoon();
   } catch (error) {

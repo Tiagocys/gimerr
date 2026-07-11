@@ -867,6 +867,14 @@ els.verificationSteps.addEventListener("click", async (event) => {
       const invite = button.dataset.invite || "";
       if (!invite) throw new Error("Convite do servidor oficial ainda não configurado.");
       window.open(invite, "_blank", "noopener");
+    } else if (button.dataset.verificationAction === "connect") {
+      const isAlreadyConnected = button.dataset.discordLinked === "true"
+        || button.textContent.toLowerCase().includes("discord conectado");
+      if (isAlreadyConnected) {
+        setVerificationFeedback("Discord já conectado. Continue pelo servidor oficial do Gimerr.", "success");
+        return;
+      }
+      await startDiscordVerification();
     }
   } catch (error) {
     setVerificationFeedback(error.message || "Não foi possível continuar a verificação.", "error");

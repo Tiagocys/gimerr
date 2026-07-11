@@ -5,6 +5,7 @@
     comments: [],
     commentsError: "",
     commentSubmitting: false,
+    replyingToCommentId: "",
     followedProfiles: [],
     commentMention: {
       active: false,
@@ -133,16 +134,17 @@
       end: -1,
       selectedIndex: 0,
       items: [],
+      textarea: null,
     };
-    const container = document.querySelector("#comment-mention-suggestions");
-    if (container) {
+    document.querySelectorAll("[data-comment-mention-suggestions], #comment-mention-suggestions").forEach((container) => {
       container.hidden = true;
       container.innerHTML = "";
-    }
+    });
   }
 
   function renderCommentMentionSuggestions() {
-    const container = document.querySelector("#comment-mention-suggestions");
+    const container = state.commentMention.textarea?.closest("form")?.querySelector("[data-comment-mention-suggestions], #comment-mention-suggestions")
+      || document.querySelector("#comment-mention-suggestions");
     if (!container) return;
     if (!state.commentMention.active || !state.commentMention.items.length) {
       closeCommentMentionSuggestions();
@@ -183,12 +185,13 @@
       end: activeMention.end,
       selectedIndex: Math.min(state.commentMention.selectedIndex || 0, items.length - 1),
       items,
+      textarea,
     };
     renderCommentMentionSuggestions();
   }
 
   function insertCommentMention(profile) {
-    const textarea = document.querySelector("#comment-body");
+    const textarea = state.commentMention.textarea || document.querySelector("#comment-body");
     if (!textarea || !profile || !state.commentMention.active) return;
     const text = textarea.value;
     const before = text.slice(0, state.commentMention.start);
@@ -368,6 +371,7 @@
         ${media}
         <div class="post-body">
           ${renderMentionLine(authorName, post)}
+          ${post.type === "listing" ? `<span class="post-marketplace-badge">Anúncio</span>` : ""}
           <div class="post-meta">
             <a class="author-block" href="${getProfileUrl(author)}">
               <div class="post-avatar">
@@ -386,7 +390,9 @@
             ${post.body ? `<p class="post-text">${escapeHtml(post.body)}</p>` : ""}
           </div>
           <a class="channel-line" href="${getGameUrl(post.game)}">
-            <span class="channel-dot" aria-hidden="true"></span>
+            <span class="channel-game-logo" aria-hidden="true">
+              <img src="${escapeHtml(post.game?.coverUrl || "./assets/avatar.svg")}" alt="">
+            </span>
             <span>${escapeHtml(post.game?.name || "Game")}</span>
           </a>
         </div>
@@ -398,16 +404,17 @@
 
   function renderCommentsSection() {
     const commentCount = state.comments.length;
+    const commentsById = buildCommentsById(state.comments);
     const comments = state.commentsError
       ? `<p class="comments-empty">${escapeHtml(state.commentsError)}</p>`
       : state.comments.length
-        ? state.comments.map(renderComment).join("")
+        ? state.comments.map((comment) => renderComment(comment, commentsById)).join("")
         : `<p class="comments-empty">Nenhum comentário ainda.</p>`;
     const form = state.session?.user
       ? `
-        <form class="comment-form" id="comment-form">
+        <form class="comment-form" id="comment-form" data-comment-form>
           <textarea id="comment-body" maxlength="500" rows="3" placeholder="Escreva um comentário"></textarea>
-          <div class="composer-mention-suggestions comment-mention-suggestions" id="comment-mention-suggestions" hidden></div>
+          <div class="composer-mention-suggestions comment-mention-suggestions" id="comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
           <div class="comment-form-actions">
             <span>Até 500 caracteres.</span>
             <button class="primary-button" type="submit" ${state.commentSubmitting ? "disabled" : ""}>
@@ -433,23 +440,89 @@
     `;
   }
 
-  function renderComment(comment) {
+  function groupCommentsByParent(comments) {
+    return (comments || []).reduce((groups, comment) => {
+      const key = comment.parentCommentId || "";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(comment);
+      return groups;
+    }, new Map());
+  }
+
+  function getReplyMention(comment) {
+    const username = comment?.author?.username ? `@${comment.author.username} ` : "";
+    return escapeHtml(username);
+  }
+
+  function buildCommentsById(comments) {
+    return new Map((comments || []).map((comment) => [String(comment.id), comment]));
+  }
+
+  function renderCommentReplyReference(comment, commentsById) {
+    const parentId = comment.parentCommentId || "";
+    if (!parentId) return "";
+    const localParent = commentsById?.get(String(parentId));
+    const parent = localParent ? {
+      id: localParent.id,
+      status: "active",
+      author: localParent.author,
+    } : comment.parent;
+    if (!parent || parent.status !== "active") {
+      return `<span class="comment-reply-reference is-deleted">Em resposta a comentário excluído</span>`;
+    }
+    const parentAuthor = parent.author || {};
+    const label = parentAuthor.displayName || parentAuthor.username || "comentário";
+    return `<a class="comment-reply-reference" href="#comment-${escapeHtml(parentId)}">Em resposta a ${escapeHtml(label)}</a>`;
+  }
+
+  function renderReplyForm(comment) {
+    if (String(state.replyingToCommentId) !== String(comment.id)) return "";
+    if (!state.session?.user) return `<a class="text-button comment-login-link" href="./sign-in.html">Entre para responder</a>`;
+    return `
+      <form class="comment-form inline-reply-form" data-comment-form data-parent-comment-id="${escapeHtml(comment.id)}">
+        <textarea maxlength="500" rows="2" placeholder="Responder comentário">${getReplyMention(comment)}</textarea>
+        <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
+        <div class="comment-form-actions">
+          <button class="text-button" type="button" data-comment-reply-cancel>Cancelar</button>
+          <button class="primary-button" type="submit" ${state.commentSubmitting ? "disabled" : ""}>
+            ${state.commentSubmitting ? "Respondendo..." : "Responder"}
+          </button>
+        </div>
+        <p class="field-feedback" data-comment-feedback></p>
+      </form>
+    `;
+  }
+
+  function renderComment(comment, commentsById) {
     const author = comment.author || {};
     const authorName = author.displayName || "Usuário Gimerr";
     const authorHandle = author.username ? `@${author.username}` : "";
+    const canDelete = state.session?.user?.id && String(author.id) === String(state.session.user.id);
     return `
-      <article class="comment-item">
-        <a class="post-avatar" href="${getProfileUrl(author)}">
-          <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
-        </a>
-        <div class="comment-copy">
-          <div class="comment-meta">
-            <a href="${getProfileUrl(author)}">${escapeHtml(authorName)}</a>
-            <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
+      <div class="comment-thread">
+        <article class="comment-item" id="comment-${escapeHtml(comment.id)}">
+          <a class="post-avatar" href="${getProfileUrl(author)}">
+            <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
+          </a>
+          <div class="comment-copy">
+            <div class="comment-meta">
+              <a href="${getProfileUrl(author)}">${escapeHtml(authorName)}</a>
+              <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
+            </div>
+            ${renderCommentReplyReference(comment, commentsById)}
+            <p>${renderTextWithMentions(comment.body, author.username)}</p>
+            <div class="comment-actions">
+              <button class="text-button comment-reply-button" type="button" data-comment-reply data-comment-id="${escapeHtml(comment.id)}">Responder</button>
+              ${canDelete ? `
+                <button class="comment-delete-button" type="button" data-comment-delete data-comment-id="${escapeHtml(comment.id)}" aria-label="Apagar comentário" title="Apagar comentário">
+                  <img src="./assets/trash.svg" alt="">
+                </button>
+              ` : ""}
+            </div>
+            ${renderReplyForm(comment)}
           </div>
-          <p>${renderTextWithMentions(comment.body, author.username)}</p>
-        </div>
-      </article>
+        </article>
+      </div>
     `;
   }
 
@@ -535,8 +608,9 @@
 
   async function submitComment(form) {
     if (!state.session?.access_token || !state.post?.id || state.commentSubmitting) return;
-    const textarea = form.querySelector("#comment-body");
-    const feedback = form.querySelector("#comment-feedback");
+    const parentCommentId = form.dataset.parentCommentId || "";
+    const textarea = form.querySelector("textarea");
+    const feedback = form.querySelector("[data-comment-feedback], #comment-feedback");
     const body = textarea?.value?.trim() || "";
     if (!body) {
       textarea?.focus();
@@ -564,6 +638,7 @@
         },
         body: JSON.stringify({
           postId: state.post.id,
+          parentCommentId: parentCommentId || null,
           body,
         }),
       });
@@ -572,6 +647,7 @@
 
       state.comments = [...state.comments, payload.comment].filter(Boolean);
       textarea.value = "";
+      state.replyingToCommentId = "";
       state.commentSubmitting = false;
       renderPost();
     } catch (error) {
@@ -587,6 +663,50 @@
         window.alert(error.message || "Não foi possível comentar.");
       }
     }
+  }
+
+  function removeCommentsFromList(comments, deletedIds) {
+    const ids = new Set((deletedIds || []).map(String));
+    return (comments || [])
+      .filter((comment) => !ids.has(String(comment.id)))
+      .map((comment) => (
+        ids.has(String(comment.parentCommentId))
+          ? {
+            ...comment,
+            parent: {
+              id: comment.parentCommentId,
+              status: "deleted",
+              body: "",
+              author: {},
+            },
+          }
+          : comment
+      ));
+  }
+
+  async function deleteComment(commentId) {
+    if (!state.session?.access_token) return;
+    const confirmed = window.confirm("Apagar este comentário?");
+    if (!confirmed) return;
+
+    const response = await fetch("/api/posts/comment-delete", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${state.session.access_token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ commentId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível apagar comentário.");
+
+    const deletedIds = payload.deletedCommentIds || [commentId];
+    state.comments = removeCommentsFromList(state.comments, deletedIds);
+    if (deletedIds.map(String).includes(String(state.replyingToCommentId))) {
+      state.replyingToCommentId = "";
+    }
+    renderPost();
   }
 
   document.addEventListener("click", async (event) => {
@@ -648,6 +768,40 @@
       return;
     }
 
+    const commentDeleteButton = target.closest("[data-comment-delete]");
+    if (commentDeleteButton) {
+      event.preventDefault();
+      try {
+        await deleteComment(commentDeleteButton.dataset.commentId || "");
+      } catch (error) {
+        console.warn("Não foi possível apagar comentário.", error);
+        window.alert(error.message || "Não foi possível apagar comentário.");
+      }
+      return;
+    }
+
+    const replyButton = target.closest("[data-comment-reply]");
+    if (replyButton) {
+      event.preventDefault();
+      const commentId = replyButton.dataset.commentId || "";
+      state.replyingToCommentId = String(state.replyingToCommentId) === String(commentId) ? "" : commentId;
+      renderPost();
+      window.setTimeout(() => {
+        const textarea = document.querySelector(`[data-parent-comment-id="${CSS.escape(commentId)}"] textarea`);
+        textarea?.focus();
+        textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+      });
+      return;
+    }
+
+    const replyCancelButton = target.closest("[data-comment-reply-cancel]");
+    if (replyCancelButton) {
+      event.preventDefault();
+      state.replyingToCommentId = "";
+      renderPost();
+      return;
+    }
+
     if (!target.closest("[data-post-menu]")) {
       closePostMenus();
     }
@@ -658,20 +812,20 @@
   });
 
   document.addEventListener("input", (event) => {
-    const textarea = event.target instanceof Element ? event.target.closest("#comment-body") : null;
+    const textarea = event.target instanceof Element ? event.target.closest("[data-comment-form] textarea") : null;
     if (!textarea) return;
     updateCommentMentionSuggestions(textarea);
   });
 
   document.addEventListener("submit", async (event) => {
-    const form = event.target instanceof Element ? event.target.closest("#comment-form") : null;
+    const form = event.target instanceof Element ? event.target.closest("[data-comment-form]") : null;
     if (!form) return;
     event.preventDefault();
     await submitComment(form);
   });
 
   document.addEventListener("keydown", (event) => {
-    const textarea = event.target instanceof Element ? event.target.closest("#comment-body") : null;
+    const textarea = event.target instanceof Element ? event.target.closest("[data-comment-form] textarea") : null;
     if (textarea && state.commentMention.active && state.commentMention.items.length) {
       if (event.key === "ArrowDown") {
         event.preventDefault();

@@ -75,6 +75,31 @@
             </div>
           </div>
 
+          <section class="composer game-composer" id="game-composer" aria-label="Criar publicação no jogo">
+            <textarea id="game-composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou publique um anúncio."></textarea>
+            <div class="composer-media" id="game-composer-media" hidden>
+              <span id="game-composer-file-name"></span>
+              <button class="text-button" id="game-composer-clear-file" type="button">Remover</button>
+            </div>
+            <div class="composer-footer">
+              <label class="checkbox-pill" for="game-composer-listing">
+                <input id="game-composer-listing" type="checkbox">
+                <span>Anúncio</span>
+              </label>
+              <div class="composer-actions">
+                <label class="text-button upload-button" for="game-composer-file">
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M19 13v6H5v-6H3v8h18v-8h-2ZM13 5.8l3.6 3.6L18 8l-6-6-6 6 1.4 1.4L11 5.8V16h2V5.8Z"/>
+                  </svg>
+                  Arquivo
+                </label>
+                <input id="game-composer-file" type="file" accept="image/*,video/*">
+                <button class="primary-button" id="game-publish-post" type="button">Publicar</button>
+              </div>
+            </div>
+            <p class="field-feedback" id="game-composer-feedback" role="status"></p>
+          </section>
+
           <div class="filter-bar" role="tablist" aria-label="Filtros do feed do jogo">
             <button class="filter-chip is-active" type="button" data-game-feed-filter="all">Tudo</button>
             <button class="filter-chip" type="button" data-game-feed-filter="listing">Anúncios</button>

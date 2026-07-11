@@ -31,9 +31,11 @@ function extractMentionUsernames(text, authorUsername = "") {
 }
 
 function toPublicComment(row) {
+  const hasParent = Boolean(row.parent_comment_id);
   return {
     id: row.id,
     postId: row.post_id,
+    parentCommentId: row.parent_comment_id || null,
     body: row.body,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -43,6 +45,19 @@ function toPublicComment(row) {
       username: row.username,
       avatarUrl: row.avatar_url,
     },
+    parent: hasParent && row.parent_status
+      ? {
+        id: row.parent_comment_id,
+        status: row.parent_status,
+        body: row.parent_body || "",
+        author: {
+          id: row.parent_profile_id || null,
+          displayName: row.parent_display_name || row.parent_username || "",
+          username: row.parent_username || "",
+          avatarUrl: row.parent_avatar_url || "",
+        },
+      }
+      : null,
   };
 }
 
@@ -116,7 +131,7 @@ async function fetchPost(env, postId) {
   return rows[0] || null;
 }
 
-async function createCommentViaRpc(env, token, { postId, body }) {
+async function createCommentViaRpc(env, token, { postId, body, parentCommentId = null }) {
   if (!token) {
     const error = new Error("Sessão ausente.");
     error.status = 401;
@@ -134,6 +149,7 @@ async function createCommentViaRpc(env, token, { postId, body }) {
     body: JSON.stringify({
       comment_post_id: postId,
       comment_body: body,
+      comment_parent_comment_id: parentCommentId || null,
     }),
   });
   const rows = await response.json().catch(() => []);
@@ -166,6 +182,7 @@ async function createCommentViaRpc(env, token, { postId, body }) {
       id: row.post_id,
       profile_id: row.post_author_id,
     },
+    parentCommentAuthorId: row.parent_comment_author_id || null,
   };
 }
 
@@ -258,24 +275,39 @@ async function insertComment(env, payload) {
   return rows[0] || null;
 }
 
-async function notifyPostAuthor(env, { post, comment, author }) {
-  if (!post?.profile_id || post.profile_id === author?.id) return;
+async function notifyCommentTarget(env, { post, comment, author, parentCommentAuthorId = null }) {
+  const recipientId = parentCommentAuthorId || post?.profile_id;
+  if (!recipientId || recipientId === author?.id) return;
 
   const authorName = author?.display_name || author?.username || "Um usuário";
+  if (!parentCommentAuthorId) {
+    await upsertPostCommentNotification(env, {
+      recipientId,
+      post,
+      comment,
+      author,
+      authorName,
+    });
+    return;
+  }
+
   const response = await fetch(`${getSupabaseRestUrl(env)}/notifications`, {
     method: "POST",
     headers: getServiceHeaders(env, { prefer: "return=minimal" }),
     body: JSON.stringify({
-      recipient_id: post.profile_id,
+      recipient_id: recipientId,
       sender_name: authorName,
       sender_avatar_url: author?.avatar_url || null,
       type: "post_comment",
-      title: `${authorName} comentou no seu post.`,
+      title: parentCommentAuthorId
+        ? `${authorName} respondeu seu comentário.`
+        : `${authorName} comentou no seu post.`,
       body: comment.body,
       action_url: `/post?id=${post.id}`,
       data: {
         post_id: post.id,
         comment_id: comment.id,
+        parent_comment_id: comment.parent_comment_id || null,
         author_id: author?.id || null,
       },
     }),
@@ -287,15 +319,96 @@ async function notifyPostAuthor(env, { post, comment, author }) {
   }
 }
 
-async function notifyMentionedUsers(env, { post, comment, author }) {
+async function upsertPostCommentNotification(env, { recipientId, post, comment, author, authorName }) {
+  const existingUrl = new URL(`${getSupabaseRestUrl(env)}/notifications`);
+  existingUrl.searchParams.set("select", "id,data");
+  existingUrl.searchParams.set("recipient_id", `eq.${recipientId}`);
+  existingUrl.searchParams.set("type", "eq.post_comment");
+  existingUrl.searchParams.set("read_at", "is.null");
+  existingUrl.searchParams.set("data->>post_id", `eq.${post.id}`);
+  existingUrl.searchParams.set("order", "created_at.desc");
+  existingUrl.searchParams.set("limit", "1");
+
+  const existingResponse = await fetch(existingUrl.toString(), {
+    headers: getServiceHeaders(env),
+  });
+  const existingRows = await existingResponse.json().catch(() => []);
+  if (!existingResponse.ok) {
+    console.warn("Não foi possível buscar notificação de comentário existente.", existingRows.message || existingRows);
+  }
+
+  const existing = existingResponse.ok ? existingRows[0] : null;
+  if (existing?.id) {
+    const previousCount = Number(existing.data?.comment_count || 1);
+    const nextCount = previousCount + 1;
+    const patchUrl = new URL(`${getSupabaseRestUrl(env)}/notifications`);
+    patchUrl.searchParams.set("id", `eq.${existing.id}`);
+
+    const patchResponse = await fetch(patchUrl.toString(), {
+      method: "PATCH",
+      headers: getServiceHeaders(env, { prefer: "return=minimal" }),
+      body: JSON.stringify({
+        sender_name: authorName,
+        sender_avatar_url: author?.avatar_url || null,
+        title: `${nextCount} comentários no seu post.`,
+        body: comment.body,
+        action_url: `/post?id=${post.id}`,
+        data: {
+          ...(existing.data || {}),
+          post_id: post.id,
+          comment_id: comment.id,
+          author_id: author?.id || null,
+          comment_count: nextCount,
+          last_author_name: authorName,
+        },
+        created_at: new Date().toISOString(),
+      }),
+    });
+    if (!patchResponse.ok) {
+      const payload = await patchResponse.json().catch(() => ({}));
+      console.warn("Não foi possível atualizar notificação de comentário.", payload.message || payload);
+    }
+    return;
+  }
+
+  const response = await fetch(`${getSupabaseRestUrl(env)}/notifications`, {
+    method: "POST",
+    headers: getServiceHeaders(env, { prefer: "return=minimal" }),
+    body: JSON.stringify({
+      recipient_id: recipientId,
+      sender_name: authorName,
+      sender_avatar_url: author?.avatar_url || null,
+      type: "post_comment",
+      title: `${authorName} comentou no seu post.`,
+      body: comment.body,
+      action_url: `/post?id=${post.id}`,
+      data: {
+        post_id: post.id,
+        comment_id: comment.id,
+        author_id: author?.id || null,
+        comment_count: 1,
+        last_author_name: authorName,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    console.warn("Não foi possível criar notificação agregada de comentário.", payload.message || payload);
+  }
+}
+
+async function notifyMentionedUsers(env, { post, comment, author, excludeIds = [] }) {
   const usernames = extractMentionUsernames(comment?.body, author?.username);
   if (!usernames.length) return;
 
   const mentionedProfiles = await findMentionedProfiles(env, usernames);
+  const excluded = new Set(excludeIds.filter(Boolean));
   const recipients = mentionedProfiles.filter((profile) => (
     profile.id
     && profile.id !== author?.id
     && profile.id !== post?.profile_id
+    && !excluded.has(profile.id)
   ));
   if (!recipients.length) return;
 
@@ -311,6 +424,7 @@ async function notifyMentionedUsers(env, { post, comment, author }) {
     data: {
       post_id: post.id,
       comment_id: comment.id,
+      parent_comment_id: comment.parent_comment_id || null,
       author_id: author?.id || null,
       author_username: author?.username || null,
       mentioned_username: profile.username,
@@ -389,6 +503,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
   try {
     const payload = await request.json().catch(() => ({}));
     const postId = cleanText(payload.postId || payload.post, 80);
+    const parentCommentId = cleanText(payload.parentCommentId || payload.parentComment || "", 80) || null;
     const body = cleanText(payload.body, 500);
 
     if (!postId) {
@@ -400,10 +515,10 @@ export async function onRequestPost({ request, env, waitUntil }) {
 
     const token = getBearerToken(request);
     try {
-      const { comment, post, author } = await createCommentViaRpc(env, token, { postId, body });
+      const { comment, post, author, parentCommentAuthorId } = await createCommentViaRpc(env, token, { postId, body, parentCommentId });
       scheduleCommentNotifications(waitUntil, Promise.all([
-        notifyPostAuthor(env, { post, comment, author }),
-        notifyMentionedUsers(env, { post, comment, author }),
+        notifyCommentTarget(env, { post, comment, author, parentCommentAuthorId }),
+        notifyMentionedUsers(env, { post, comment, author, excludeIds: [parentCommentAuthorId] }),
       ]));
 
       return jsonResponse({
@@ -439,6 +554,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
       comment = await insertComment(env, {
         post_id: postId,
         profile_id: auth.user.id,
+        parent_comment_id: parentCommentId,
         body,
       });
     } catch (error) {
@@ -458,7 +574,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
     }
 
     scheduleCommentNotifications(waitUntil, Promise.all([
-      notifyPostAuthor(env, { post, comment, author }),
+      notifyCommentTarget(env, { post, comment, author }),
       notifyMentionedUsers(env, { post, comment, author }),
     ]));
 

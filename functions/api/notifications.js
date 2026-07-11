@@ -32,7 +32,7 @@ export async function onRequestGet({ request, env }) {
     url.searchParams.set("limit", String(limit));
 
     const unreadUrl = new URL(`${restUrl}/notifications`);
-    unreadUrl.searchParams.set("select", "id");
+    unreadUrl.searchParams.set("select", "id,type,data");
     unreadUrl.searchParams.set("recipient_id", `eq.${auth.user.id}`);
     unreadUrl.searchParams.set("read_at", "is.null");
 
@@ -41,13 +41,11 @@ export async function onRequestGet({ request, env }) {
         headers: getServiceHeaders(env),
       }),
       fetch(unreadUrl.toString(), {
-        method: "HEAD",
-        headers: getServiceHeaders(env, {
-          prefer: "count=exact",
-        }),
+        headers: getServiceHeaders(env),
       }),
     ]);
     const rows = await response.json().catch(() => []);
+    const unreadRows = await unreadResponse.json().catch(() => []);
 
     if (!response.ok) {
       throw new Error(rows.message || "Não foi possível carregar notificações.");
@@ -57,8 +55,12 @@ export async function onRequestGet({ request, env }) {
       throw new Error("Não foi possível carregar contador de notificações.");
     }
 
-    const contentRange = unreadResponse.headers.get("content-range") || "";
-    const unreadCount = Number(contentRange.split("/").pop()) || 0;
+    const unreadCount = (unreadRows || []).reduce((total, notification) => {
+      if (notification.type === "post_comment") {
+        return total + Math.max(1, Number(notification.data?.comment_count || 1));
+      }
+      return total + 1;
+    }, 0);
     return jsonResponse({
       unreadCount,
       notifications: rows.map(toPublicNotification),

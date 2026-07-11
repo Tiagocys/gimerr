@@ -4,6 +4,7 @@
     loading: true,
     game: null,
     followers: [],
+    followedProfiles: [],
     followerCount: 0,
     following: false,
     feed: [],
@@ -11,9 +12,18 @@
     activeCommentPostId: "",
     activeCommentsPostId: "",
     commentSubmittingPostId: "",
+    replyingToCommentId: "",
     commentsLoadingPostId: "",
     commentsByPost: {},
     commentsErrorByPost: {},
+    commentMention: {
+      active: false,
+      start: -1,
+      end: -1,
+      selectedIndex: 0,
+      items: [],
+      textarea: null,
+    },
   };
 
   const els = {
@@ -32,6 +42,15 @@
     feedList: document.querySelector("#game-feed-list"),
     filterButtons: document.querySelectorAll("[data-game-feed-filter]"),
     feedSubtitle: document.querySelector("#game-feed-subtitle"),
+    composer: document.querySelector("#game-composer"),
+    composerText: document.querySelector("#game-composer-text"),
+    composerFile: document.querySelector("#game-composer-file"),
+    composerMedia: document.querySelector("#game-composer-media"),
+    composerFileName: document.querySelector("#game-composer-file-name"),
+    composerClearFile: document.querySelector("#game-composer-clear-file"),
+    composerListing: document.querySelector("#game-composer-listing"),
+    publishPost: document.querySelector("#game-publish-post"),
+    composerFeedback: document.querySelector("#game-composer-feedback"),
   };
 
   if (!window.GimerrAuth || !els.title) return;
@@ -78,6 +97,21 @@
   function getProfileUrl(profile) {
     if (profile?.username) return `./profile?u=${encodeURIComponent(profile.username)}`;
     return `./profile?id=${encodeURIComponent(profile.id)}`;
+  }
+
+  function getCurrentGameUrl() {
+    if (state.game?.slug) return `./game?slug=${encodeURIComponent(state.game.slug)}`;
+    return `./game?id=${encodeURIComponent(state.game?.igdbId || "")}`;
+  }
+
+  function normalizeFollowedProfile(profile) {
+    if (!profile?.id || !profile?.username) return null;
+    return {
+      id: profile.id,
+      displayName: profile.display_name || profile.username,
+      username: profile.username,
+      avatarUrl: profile.avatar_url || "./assets/avatar.svg",
+    };
   }
 
   function extractMentionUsernames(text, authorUsername = "") {
@@ -128,6 +162,154 @@
 
     output += escapeHtml(value.slice(lastIndex));
     return output;
+  }
+
+  function isMobileVideoUploadDevice() {
+    const userAgent = navigator.userAgent || "";
+    const isMobileOs = /Android|iPhone|iPad|iPod/i.test(userAgent);
+    const isTouchMac = /Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1;
+    return isMobileOs || isTouchMac;
+  }
+
+  function isVideoFile(file) {
+    return Boolean(file?.type?.startsWith("video/"));
+  }
+
+  function isImageFile(file) {
+    return Boolean(file?.type?.startsWith("image/"));
+  }
+
+  function validateComposerFile(file, type) {
+    if (!file) return true;
+    if (type === "listing" && !isImageFile(file)) {
+      window.alert("Anúncios aceitam imagem JPG, PNG, WebP ou GIF.");
+      return false;
+    }
+    if (isVideoFile(file)) {
+      if (isMobileVideoUploadDevice()) {
+        window.alert("O upload de vídeos pode ser feito apenas através de um PC/Mac.");
+        return false;
+      }
+      return true;
+    }
+    if (!isImageFile(file)) {
+      window.alert("Selecione uma imagem JPG, PNG, WebP, GIF ou um vídeo MP4, WebM ou MOV.");
+      return false;
+    }
+    return true;
+  }
+
+  function getPostTypeFromComposer(file) {
+    if (els.composerListing?.checked) return "listing";
+    if (isVideoFile(file)) return "video";
+    return "post";
+  }
+
+  function setComposerFeedback(message = "", kind = "") {
+    if (!els.composerFeedback) return;
+    els.composerFeedback.textContent = message;
+    els.composerFeedback.className = `field-feedback${kind ? ` is-${kind}` : ""}`;
+  }
+
+  function getActiveMention(text, cursor) {
+    const beforeCursor = String(text || "").slice(0, cursor);
+    const match = beforeCursor.match(/(^|[\s([{"'“‘])@([a-z0-9_.]{1,24})$/i);
+    if (!match) return null;
+    const query = match[2] || "";
+    if (!query) return null;
+    return {
+      start: beforeCursor.length - query.length - 1,
+      end: cursor,
+      query: query.toLowerCase(),
+    };
+  }
+
+  function getMentionMatches(query) {
+    if (!query) return [];
+    const normalized = query.toLowerCase();
+    return state.followedProfiles
+      .filter((profile) => {
+        const username = String(profile.username || "").toLowerCase();
+        const displayName = String(profile.displayName || "").toLowerCase();
+        return username.startsWith(normalized) || displayName.startsWith(normalized);
+      })
+      .slice(0, 6);
+  }
+
+  function closeCommentMentionSuggestions() {
+    state.commentMention = {
+      active: false,
+      start: -1,
+      end: -1,
+      selectedIndex: 0,
+      items: [],
+      textarea: null,
+    };
+    document.querySelectorAll("[data-comment-mention-suggestions]").forEach((container) => {
+      container.hidden = true;
+      container.innerHTML = "";
+    });
+  }
+
+  function renderCommentMentionSuggestions() {
+    const textarea = state.commentMention.textarea;
+    const container = textarea?.closest("form")?.querySelector("[data-comment-mention-suggestions]");
+    if (!container) return;
+    if (!state.commentMention.active || !state.commentMention.items.length) {
+      closeCommentMentionSuggestions();
+      return;
+    }
+
+    container.hidden = false;
+    container.innerHTML = state.commentMention.items.map((profile, index) => `
+      <button class="composer-mention-option${index === state.commentMention.selectedIndex ? " is-active" : ""}" type="button" data-comment-mention-index="${index}">
+        <span class="user-search-avatar">
+          <img src="${escapeHtml(profile.avatarUrl || "./assets/avatar.svg")}" alt="">
+        </span>
+        <span class="composer-mention-copy">
+          <strong>${escapeHtml(profile.displayName)}</strong>
+          <span>@${escapeHtml(profile.username)}</span>
+        </span>
+      </button>
+    `).join("");
+  }
+
+  function updateCommentMentionSuggestions(textarea) {
+    const activeMention = getActiveMention(textarea.value, textarea.selectionStart);
+    if (!activeMention) {
+      closeCommentMentionSuggestions();
+      return;
+    }
+
+    const items = getMentionMatches(activeMention.query);
+    if (!items.length) {
+      closeCommentMentionSuggestions();
+      return;
+    }
+
+    state.commentMention = {
+      active: true,
+      start: activeMention.start,
+      end: activeMention.end,
+      selectedIndex: Math.min(state.commentMention.selectedIndex || 0, items.length - 1),
+      items,
+      textarea,
+    };
+    renderCommentMentionSuggestions();
+  }
+
+  function insertCommentMention(profile) {
+    const textarea = state.commentMention.textarea;
+    if (!textarea || !profile || !state.commentMention.active) return;
+    const text = textarea.value;
+    const before = text.slice(0, state.commentMention.start);
+    const after = text.slice(state.commentMention.end);
+    const nextValue = `${before}@${profile.username} ${after}`;
+    const nextCursor = before.length + profile.username.length + 2;
+    textarea.value = nextValue.slice(0, Number(textarea.maxLength || 500));
+    closeCommentMentionSuggestions();
+    textarea.focus();
+    textarea.setSelectionRange(nextCursor, nextCursor);
   }
 
   function formatCount(value) {
@@ -283,23 +465,92 @@
     `;
   }
 
-  function renderInlineCommentItem(comment) {
+  function groupCommentsByParent(comments) {
+    return (comments || []).reduce((groups, comment) => {
+      const key = comment.parentCommentId || "";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(comment);
+      return groups;
+    }, new Map());
+  }
+
+  function getReplyMention(comment) {
+    const username = comment?.author?.username ? `@${comment.author.username} ` : "";
+    return escapeHtml(username);
+  }
+
+  function buildCommentsById(comments) {
+    return new Map((comments || []).map((comment) => [String(comment.id), comment]));
+  }
+
+  function renderCommentReplyReference(comment, commentsById) {
+    const parentId = comment.parentCommentId || "";
+    if (!parentId) return "";
+    const localParent = commentsById?.get(String(parentId));
+    const parent = localParent ? {
+      id: localParent.id,
+      status: "active",
+      author: localParent.author,
+    } : comment.parent;
+    if (!parent || parent.status !== "active") {
+      return `<span class="comment-reply-reference is-deleted">Em resposta a comentário excluído</span>`;
+    }
+    const parentAuthor = parent.author || {};
+    const label = parentAuthor.displayName || parentAuthor.username || "comentário";
+    return `<a class="comment-reply-reference" href="#comment-${escapeHtml(parentId)}">Em resposta a ${escapeHtml(label)}</a>`;
+  }
+
+  function renderInlineCommentReplyForm(postId, comment) {
+    if (String(state.replyingToCommentId) !== String(comment.id)) return "";
+    if (!state.session?.access_token) {
+      return `<a class="text-button inline-comment-login" href="./sign-in.html">Entre para responder</a>`;
+    }
+    const isSubmitting = String(state.commentSubmittingPostId) === String(comment.id);
+    return `
+      <form class="inline-comment-form inline-reply-form" data-inline-comment-form data-post-id="${escapeHtml(postId)}" data-parent-comment-id="${escapeHtml(comment.id)}">
+        <textarea maxlength="500" rows="2" placeholder="Responder comentário">${getReplyMention(comment)}</textarea>
+        <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
+        <div class="inline-comment-actions">
+          <button class="text-button" type="button" data-comment-reply-cancel>Cancelar</button>
+          <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>
+            ${isSubmitting ? "Respondendo..." : "Responder"}
+          </button>
+        </div>
+        <p class="field-feedback" data-inline-comment-feedback></p>
+      </form>
+    `;
+  }
+
+  function renderInlineCommentItem(comment, postId, commentsById) {
     const author = comment.author || {};
     const authorName = author.displayName || "Usuário Gimerr";
     const authorHandle = author.username ? `@${author.username}` : "";
+    const canDelete = state.session?.user?.id && String(author.id) === String(state.session.user.id);
     return `
-      <article class="comment-item inline-comment-item">
-        <a class="post-avatar" href="${getProfileUrl(author)}">
-          <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
-        </a>
-        <div class="comment-copy">
-          <div class="comment-meta">
-            <a href="${getProfileUrl(author)}">${escapeHtml(authorName)}</a>
-            <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
+      <div class="comment-thread">
+        <article class="comment-item inline-comment-item" id="comment-${escapeHtml(comment.id)}">
+          <a class="post-avatar" href="${getProfileUrl(author)}">
+            <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
+          </a>
+          <div class="comment-copy">
+            <div class="comment-meta">
+              <a href="${getProfileUrl(author)}">${escapeHtml(authorName)}</a>
+              <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
+            </div>
+            ${renderCommentReplyReference(comment, commentsById)}
+            <p>${renderTextWithMentions(comment.body, author.username)}</p>
+            <div class="comment-actions">
+              <button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>
+              ${canDelete ? `
+                <button class="comment-delete-button" type="button" data-comment-delete data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}" aria-label="Apagar comentário" title="Apagar comentário">
+                  <img src="./assets/trash.svg" alt="">
+                </button>
+              ` : ""}
+            </div>
+            ${renderInlineCommentReplyForm(postId, comment)}
           </div>
-          <p>${renderTextWithMentions(comment.body, author.username)}</p>
-        </div>
-      </article>
+        </article>
+      </div>
     `;
   }
 
@@ -311,10 +562,11 @@
     const isLoading = String(state.commentsLoadingPostId) === postId;
     const error = state.commentsErrorByPost[postId] || "";
     const comments = commentState.items || [];
+    const commentsById = buildCommentsById(comments);
     const body = error
       ? `<p class="comments-empty">${escapeHtml(error)}</p>`
       : comments.length
-        ? comments.map(renderInlineCommentItem).join("")
+        ? comments.map((comment) => renderInlineCommentItem(comment, postId, commentsById)).join("")
         : `<p class="comments-empty">${isLoading ? "Carregando comentários..." : "Nenhum comentário ainda."}</p>`;
     const moreButton = commentState.hasMore
       ? `<button class="text-button inline-comments-more" type="button" data-post-comments-more data-post-id="${escapeHtml(postId)}" ${isLoading ? "disabled" : ""}>${isLoading ? "Carregando..." : "Ver mais comentários"}</button>`
@@ -369,6 +621,7 @@
     return `
       <form class="inline-comment-form" data-inline-comment-form data-post-id="${escapeHtml(post.id)}">
         <textarea maxlength="500" rows="2" placeholder="Escreva um comentário"></textarea>
+        <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
         <div class="inline-comment-actions">
           <span>Até 500 caracteres.</span>
           <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>
@@ -382,6 +635,8 @@
 
   async function submitInlineComment(form) {
     const postId = form.dataset.postId || "";
+    const parentCommentId = form.dataset.parentCommentId || "";
+    const submitKey = parentCommentId || postId;
     const textarea = form.querySelector("textarea");
     const feedback = form.querySelector("[data-inline-comment-feedback]");
     const body = textarea?.value?.trim() || "";
@@ -390,7 +645,7 @@
       return;
     }
 
-    state.commentSubmittingPostId = postId;
+    state.commentSubmittingPostId = submitKey;
     const submitButton = form.querySelector('button[type="submit"]');
     if (submitButton) {
       submitButton.disabled = true;
@@ -405,7 +660,7 @@
           authorization: `Bearer ${state.session.access_token}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ postId, body }),
+        body: JSON.stringify({ postId, body, parentCommentId: parentCommentId || null }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Não foi possível comentar.");
@@ -422,9 +677,17 @@
           nextOffset: Number(state.commentsByPost[postId].nextOffset || 0) + 1,
         };
       }
-      state.activeCommentPostId = "";
+      if (parentCommentId) {
+        state.replyingToCommentId = "";
+      } else {
+        state.activeCommentPostId = "";
+      }
     } catch (error) {
-      state.activeCommentPostId = postId;
+      if (parentCommentId) {
+        state.replyingToCommentId = parentCommentId;
+      } else {
+        state.activeCommentPostId = postId;
+      }
       if (feedback) {
         feedback.textContent = error.message || "Não foi possível comentar.";
         feedback.className = "field-feedback is-error";
@@ -435,8 +698,184 @@
       }
     } finally {
       state.commentSubmittingPostId = "";
-      if (String(state.activeCommentPostId) !== String(postId)) renderFeed({ prepareVideos: false });
+      if (String(state.activeCommentPostId) !== String(postId) || parentCommentId) renderFeed({ prepareVideos: false });
     }
+  }
+
+  function setPublishing(isPublishing, label = "Publicar") {
+    if (els.publishPost) {
+      els.publishPost.disabled = isPublishing || !state.session?.user || !state.game;
+      els.publishPost.textContent = isPublishing ? label : "Publicar";
+    }
+    if (els.composerText) els.composerText.disabled = isPublishing || !state.session?.user || !state.game;
+    if (els.composerFile) els.composerFile.disabled = isPublishing || !state.session?.user || !state.game;
+    if (els.composerListing) els.composerListing.disabled = isPublishing || !state.session?.user || !state.game;
+  }
+
+  async function uploadComposerMedia(file, target) {
+    if (!file) return null;
+
+    const formData = new FormData();
+    formData.append("target", target);
+    formData.append("file", file);
+
+    const response = await fetch("/api/post-media-upload", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${state.session.access_token}`,
+      },
+      body: formData,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.error || "Não foi possível enviar a mídia.");
+      error.code = payload.code;
+      error.discordLinked = payload.discordLinked;
+      error.verificationStatus = payload.verificationStatus;
+      throw error;
+    }
+    return payload;
+  }
+
+  async function createGamePost({ type, text, uploadedMedia }) {
+    const response = await fetch("/api/posts/create", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${state.session.access_token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        gameId: state.game.igdbId,
+        type,
+        body: text,
+        mediaUrl: uploadedMedia?.url || null,
+        mediaKey: uploadedMedia?.key || null,
+        mediaType: uploadedMedia?.mediaType || null,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(payload.error || "Não foi possível publicar.");
+      error.code = payload.code;
+      error.discordLinked = payload.discordLinked;
+      error.verificationStatus = payload.verificationStatus;
+      throw error;
+    }
+    return payload.post;
+  }
+
+  function clearComposerFile() {
+    if (els.composerFile) els.composerFile.value = "";
+    if (els.composerMedia) els.composerMedia.hidden = true;
+    if (els.composerFileName) els.composerFileName.textContent = "";
+  }
+
+  function renderComposerFile() {
+    const [file] = els.composerFile?.files || [];
+    if (!file) {
+      clearComposerFile();
+      return;
+    }
+    if (els.composerMedia) els.composerMedia.hidden = false;
+    if (els.composerFileName) els.composerFileName.textContent = file.name;
+  }
+
+  async function publishGamePost() {
+    if (!state.session?.user) {
+      window.location.assign("./sign-in.html");
+      return;
+    }
+    if (!state.game) return;
+
+    const text = els.composerText?.value?.trim() || "";
+    const [file] = els.composerFile?.files || [];
+    if (!text && !file) {
+      els.composerText?.focus();
+      return;
+    }
+
+    const type = getPostTypeFromComposer(file);
+    if (!validateComposerFile(file, type)) return;
+
+    try {
+      setComposerFeedback("");
+      setPublishing(true, file ? "Enviando..." : "Publicando...");
+      const uploadTarget = file ? type : "post";
+      const uploadedMedia = await uploadComposerMedia(file, uploadTarget);
+      setPublishing(true, "Publicando...");
+      await createGamePost({ type, text, uploadedMedia });
+      if (els.composerText) els.composerText.value = "";
+      if (els.composerListing) els.composerListing.checked = false;
+      clearComposerFile();
+      await loadGame();
+      setComposerFeedback("Publicado.", "success");
+    } catch (error) {
+      console.warn("Não foi possível publicar no game.", error);
+      if (error.code === "account_not_verified") {
+        setComposerFeedback("Verifique sua conta para publicar.", "error");
+        return;
+      }
+      setComposerFeedback(error.message || "Não foi possível publicar.", "error");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  function removeCommentsFromList(comments, deletedIds) {
+    const ids = new Set((deletedIds || []).map(String));
+    return (comments || [])
+      .filter((comment) => !ids.has(String(comment.id)))
+      .map((comment) => (
+        ids.has(String(comment.parentCommentId))
+          ? {
+            ...comment,
+            parent: {
+              id: comment.parentCommentId,
+              status: "deleted",
+              body: "",
+              author: {},
+            },
+          }
+          : comment
+      ));
+  }
+
+  async function deleteInlineComment(postId, commentId) {
+    if (!state.session?.access_token) return;
+    const confirmed = window.confirm("Apagar este comentário?");
+    if (!confirmed) return;
+
+    const response = await fetch("/api/posts/comment-delete", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${state.session.access_token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ commentId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível apagar comentário.");
+
+    const deletedIds = payload.deletedCommentIds || [commentId];
+    const deletedCount = Number(payload.deletedCount || deletedIds.length || 1);
+    if (state.commentsByPost[postId]?.items) {
+      state.commentsByPost[postId] = {
+        ...state.commentsByPost[postId],
+        items: removeCommentsFromList(state.commentsByPost[postId].items, deletedIds),
+        nextOffset: Math.max(0, Number(state.commentsByPost[postId].nextOffset || 0) - deletedCount),
+      };
+    }
+    state.feed = state.feed.map((post) => (
+      String(post.id) === String(postId)
+        ? { ...post, commentCount: Math.max(0, Number(post.commentCount || 0) - deletedCount) }
+        : post
+    ));
+    if (deletedIds.map(String).includes(String(state.replyingToCommentId))) {
+      state.replyingToCommentId = "";
+    }
+    renderFeed({ prepareVideos: false });
   }
 
   async function deletePost(postId) {
@@ -514,6 +953,7 @@
     if (!state.session?.user) {
       els.followButton.textContent = "Entre para seguir";
     }
+    setPublishing(false);
   }
 
   function renderFollowers() {
@@ -562,6 +1002,7 @@
       <article class="post-card">
         ${media}
         <div class="post-body">
+          ${post.type === "listing" ? `<span class="post-marketplace-badge">Anúncio</span>` : ""}
           ${renderMentionLine(authorName, post)}
           <div class="post-meta">
             <a class="author-block" href="${getProfileUrl(author)}">
@@ -580,6 +1021,12 @@
           <div>
             ${post.body || post.text ? `<p class="post-text">${escapeHtml(post.body || post.text)}</p>` : ""}
           </div>
+          <a class="channel-line" href="${getCurrentGameUrl()}">
+            <span class="channel-game-logo" aria-hidden="true">
+              <img src="${escapeHtml(state.game?.coverUrl || "./assets/avatar.svg")}" alt="">
+            </span>
+            <span>${escapeHtml(state.game?.name || "Game")}</span>
+          </a>
           ${renderPostActions(post)}
         </div>
       </article>
@@ -616,9 +1063,51 @@
     state.followerCount = Number(payload.followerCount || 0);
     state.following = Boolean(payload.isFollowing);
     state.feed = payload.feed || [];
+    await loadFollowedProfiles().catch((error) => {
+      console.warn("Não foi possível carregar perfis seguidos para marcações.", error);
+      state.followedProfiles = [];
+    });
     state.loading = false;
     els.layout.classList.remove("is-loading");
     renderGame();
+  }
+
+  async function loadFollowedProfiles() {
+    if (!state.session?.user || !window.GimerrAuth) {
+      state.followedProfiles = [];
+      return;
+    }
+
+    const client = await window.GimerrAuth.getClient();
+    const { data: follows, error: followsError } = await client
+      .from("user_follows")
+      .select("following_id")
+      .eq("follower_id", state.session.user.id)
+      .order("created_at", { ascending: false })
+      .limit(80);
+
+    if (followsError) throw followsError;
+
+    const followedIds = [...new Set((follows || [])
+      .map((row) => row.following_id)
+      .filter(Boolean))];
+
+    if (!followedIds.length) {
+      state.followedProfiles = [];
+      return;
+    }
+
+    const { data: profiles, error: profilesError } = await client
+      .from("public_profiles")
+      .select("id, display_name, username, avatar_url")
+      .in("id", followedIds);
+
+    if (profilesError) throw profilesError;
+
+    const byId = new Map((profiles || []).map((profile) => [profile.id, profile]));
+    state.followedProfiles = followedIds
+      .map((id) => normalizeFollowedProfile(byId.get(id)))
+      .filter(Boolean);
   }
 
   async function toggleFollow() {
@@ -658,6 +1147,16 @@
   }
 
   els.followButton.addEventListener("click", toggleFollow);
+  els.publishPost?.addEventListener("click", publishGamePost);
+  els.composerFile?.addEventListener("change", renderComposerFile);
+  els.composerClearFile?.addEventListener("click", clearComposerFile);
+  els.composerListing?.addEventListener("change", () => {
+    if (els.composerFile) {
+      els.composerFile.accept = els.composerListing.checked
+        ? "image/jpeg,image/png,image/webp,image/gif"
+        : "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
+    }
+  });
   els.filterButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.filter = button.dataset.gameFeedFilter;
@@ -708,8 +1207,13 @@
     if (commentToggle) {
       event.preventDefault();
       const postId = commentToggle.dataset.postId || "";
-      state.activeCommentPostId = String(state.activeCommentPostId) === String(postId) ? "" : postId;
+      const willOpen = String(state.activeCommentPostId) !== String(postId);
+      state.activeCommentPostId = willOpen ? postId : "";
+      if (willOpen) state.activeCommentsPostId = postId;
       renderFeed({ prepareVideos: false });
+      if (willOpen && !state.commentsByPost[postId]) {
+        await loadInlineComments(postId);
+      }
       window.setTimeout(() => {
         document.querySelector(`[data-inline-comment-form][data-post-id="${CSS.escape(postId)}"] textarea`)?.focus();
       });
@@ -733,6 +1237,42 @@
     if (commentsMoreButton) {
       event.preventDefault();
       await loadInlineComments(commentsMoreButton.dataset.postId || "", { append: true });
+      return;
+    }
+
+    const commentDeleteButton = target.closest("[data-comment-delete]");
+    if (commentDeleteButton) {
+      event.preventDefault();
+      try {
+        await deleteInlineComment(commentDeleteButton.dataset.postId || "", commentDeleteButton.dataset.commentId || "");
+      } catch (error) {
+        console.warn("Não foi possível apagar comentário.", error);
+        window.alert(error.message || "Não foi possível apagar comentário.");
+      }
+      return;
+    }
+
+    const replyButton = target.closest("[data-comment-reply]");
+    if (replyButton) {
+      event.preventDefault();
+      const postId = replyButton.dataset.postId || "";
+      const commentId = replyButton.dataset.commentId || "";
+      state.activeCommentsPostId = postId;
+      state.replyingToCommentId = String(state.replyingToCommentId) === String(commentId) ? "" : commentId;
+      renderFeed({ prepareVideos: false });
+      window.setTimeout(() => {
+        const textarea = document.querySelector(`[data-parent-comment-id="${CSS.escape(commentId)}"] textarea`);
+        textarea?.focus();
+        textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+      });
+      return;
+    }
+
+    const replyCancelButton = target.closest("[data-comment-reply-cancel]");
+    if (replyCancelButton) {
+      event.preventDefault();
+      state.replyingToCommentId = "";
+      renderFeed({ prepareVideos: false });
       return;
     }
 
@@ -761,8 +1301,45 @@
     await submitInlineComment(form);
   });
 
+  document.addEventListener("input", (event) => {
+    const textarea = event.target instanceof Element ? event.target.closest("[data-inline-comment-form] textarea") : null;
+    if (!textarea) return;
+    updateCommentMentionSuggestions(textarea);
+  });
+
+  document.addEventListener("mousedown", (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest("[data-comment-mention-index]")
+      : null;
+    if (!button) return;
+    event.preventDefault();
+    const profile = state.commentMention.items[Number(button.dataset.commentMentionIndex || 0)];
+    insertCommentMention(profile);
+  });
+
   document.addEventListener("keydown", (event) => {
+    const textarea = event.target instanceof Element ? event.target.closest("[data-inline-comment-form] textarea") : null;
+    if (textarea && state.commentMention.active && state.commentMention.items.length) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        state.commentMention.selectedIndex = (state.commentMention.selectedIndex + 1) % state.commentMention.items.length;
+        renderCommentMentionSuggestions();
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        state.commentMention.selectedIndex = (state.commentMention.selectedIndex - 1 + state.commentMention.items.length) % state.commentMention.items.length;
+        renderCommentMentionSuggestions();
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        insertCommentMention(state.commentMention.items[state.commentMention.selectedIndex]);
+        return;
+      }
+    }
     if (event.key === "Escape") closePostMenus();
+    if (event.key === "Escape") closeCommentMentionSuggestions();
   });
 
   if (!redirectLegacySharedPostUrl()) loadGame();

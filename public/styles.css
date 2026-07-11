@@ -847,6 +847,27 @@ select {
   gap: 12px;
 }
 
+.checkbox-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.checkbox-pill input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
 .composer-footer select {
   max-width: 280px;
 }
@@ -941,6 +962,18 @@ select {
   display: grid;
   gap: 12px;
   padding: 16px;
+}
+
+.post-marketplace-badge {
+  justify-self: start;
+  width: fit-content;
+  padding: 3px 8px;
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 6px;
+  background: rgba(20, 184, 166, 0.1);
+  color: #0f766e;
+  font-size: 0.74rem;
+  font-weight: 900;
 }
 
 .post-meta {
@@ -1355,6 +1388,12 @@ video.media-frame {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
   gap: 10px;
+  min-width: 0;
+}
+
+.comment-thread {
+  display: grid;
+  min-width: 0;
 }
 
 .comment-copy {
@@ -1384,11 +1423,126 @@ video.media-frame {
   font-weight: 800;
 }
 
+.comment-reply-reference {
+  justify-self: start;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.comment-reply-reference:hover,
+.comment-reply-reference:focus-visible {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  outline: 0;
+}
+
+.comment-reply-reference.is-deleted {
+  color: var(--muted);
+  cursor: default;
+}
+
+.comment-item:target .comment-copy {
+  outline: 2px solid rgba(37, 99, 235, 0.25);
+  outline-offset: 2px;
+}
+
 .comment-copy p,
 .comments-empty {
   margin: 0;
   color: var(--text);
   line-height: 1.45;
+}
+
+.comment-reply-button {
+  justify-self: start;
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 0.78rem;
+}
+
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.comment-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.comment-delete-button img {
+  width: 15px;
+  height: 15px;
+  opacity: 0.65;
+}
+
+.comment-delete-button:hover,
+.comment-delete-button:focus-visible {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.22);
+  outline: 0;
+}
+
+.comment-delete-button:hover img,
+.comment-delete-button:focus-visible img {
+  opacity: 1;
+}
+
+.comment-replies {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding-left: 18px;
+  border-left: 2px solid var(--line);
+  min-width: 0;
+}
+
+.comment-replies .comment-replies {
+  padding-left: 12px;
+  border-left-color: transparent;
+}
+
+.comment-replies .comment-replies .comment-replies {
+  padding-left: 6px;
+}
+
+.comment-replies .comment-replies .comment-replies .comment-replies {
+  padding-left: 0;
+}
+
+.comment-replies .comment-item {
+  grid-template-columns: 34px minmax(0, 1fr);
+}
+
+.comment-replies .comment-replies .comment-item {
+  grid-template-columns: 30px minmax(0, 1fr);
+}
+
+.comment-replies .post-avatar {
+  width: 34px;
+  height: 34px;
+}
+
+.comment-replies .comment-replies .post-avatar {
+  width: 30px;
+  height: 30px;
+}
+
+.inline-reply-form {
+  margin-top: 8px;
 }
 
 .inline-mention {
@@ -1495,6 +1649,24 @@ video.media-frame {
   padding: 8px 10px;
 }
 
+.comment-replies .inline-comment-item {
+  grid-template-columns: 34px minmax(0, 1fr);
+}
+
+.comment-replies .comment-replies .inline-comment-item {
+  grid-template-columns: 30px minmax(0, 1fr);
+}
+
+.comment-replies .inline-comment-item .post-avatar {
+  width: 34px;
+  height: 34px;
+}
+
+.comment-replies .comment-replies .inline-comment-item .post-avatar {
+  width: 30px;
+  height: 30px;
+}
+
 .inline-comments-more {
   justify-self: start;
 }
@@ -1535,6 +1707,24 @@ video.media-frame {
 .channel-line {
   gap: 8px;
   font-size: 0.88rem;
+  text-decoration: none;
+}
+
+.channel-game-logo {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-strong);
+}
+
+.channel-game-logo img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .channel-dot {
@@ -1760,7 +1950,42 @@ video.media-frame {
 }
 
 .platform-pill {
+  gap: 7px;
+  border-color: transparent;
+  color: #fff;
   text-decoration: none;
+}
+
+.platform-pill:hover,
+.platform-pill:focus-visible {
+  color: #fff;
+  filter: brightness(0.96);
+}
+
+.platform-pill img {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.platform-pill span {
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-pill strong {
+  color: inherit;
+}
+
+.platform-pill-discord {
+  background: #5865f2;
+}
+
+.platform-pill-twitch {
+  background: #9146ff;
 }
 
 .contact-pill img {
@@ -3219,6 +3444,35 @@ video.media-frame {
   .post-card-tools {
     justify-content: space-between;
     width: 100%;
+  }
+
+  .comment-item {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .comment-replies {
+    padding-left: 10px;
+  }
+
+  .comment-replies .comment-replies {
+    padding-left: 6px;
+  }
+
+  .comment-replies .comment-replies .comment-replies {
+    padding-left: 0;
+  }
+
+  .comment-replies .comment-item,
+  .comment-replies .inline-comment-item,
+  .inline-comment-item {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .comment-replies .post-avatar,
+  .comment-replies .inline-comment-item .post-avatar,
+  .inline-comment-item .post-avatar {
+    width: 30px;
+    height: 30px;
   }
 
   .profile-main {

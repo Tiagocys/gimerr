@@ -24,9 +24,19 @@ const state = {
   activeCommentPostId: "",
   activeCommentsPostId: "",
   commentSubmittingPostId: "",
+  replyingToCommentId: "",
   commentsLoadingPostId: "",
   commentsByPost: {},
   commentsErrorByPost: {},
+  followedProfiles: [],
+  commentMention: {
+    active: false,
+    start: -1,
+    end: -1,
+    selectedIndex: 0,
+    items: [],
+    textarea: null,
+  },
 };
 
 const els = {
@@ -91,6 +101,16 @@ function getProfileUrl(profile) {
   return `./profile?id=${encodeURIComponent(profile.id || profile.follower_id || profile.recommender_id)}`;
 }
 
+function normalizeFollowedProfile(profile) {
+  if (!profile?.id || !profile?.username) return null;
+  return {
+    id: profile.id,
+    displayName: profile.display_name || profile.username,
+    username: profile.username,
+    avatarUrl: profile.avatar_url || "./assets/avatar.svg",
+  };
+}
+
 function extractMentionUsernames(text, authorUsername = "") {
   const mentions = [];
   const seen = new Set();
@@ -139,6 +159,107 @@ function renderTextWithMentions(text, authorUsername = "") {
 
   output += escapeHtml(value.slice(lastIndex));
   return output;
+}
+
+function getActiveMention(text, cursor) {
+  const beforeCursor = String(text || "").slice(0, cursor);
+  const match = beforeCursor.match(/(^|[\s([{"'“‘])@([a-z0-9_.]{1,24})$/i);
+  if (!match) return null;
+  const query = match[2] || "";
+  if (!query) return null;
+  return {
+    start: beforeCursor.length - query.length - 1,
+    end: cursor,
+    query: query.toLowerCase(),
+  };
+}
+
+function getMentionMatches(query) {
+  if (!query) return [];
+  const normalized = query.toLowerCase();
+  return state.followedProfiles
+    .filter((profile) => {
+      const username = String(profile.username || "").toLowerCase();
+      const displayName = String(profile.displayName || "").toLowerCase();
+      return username.startsWith(normalized) || displayName.startsWith(normalized);
+    })
+    .slice(0, 6);
+}
+
+function closeCommentMentionSuggestions() {
+  state.commentMention = {
+    active: false,
+    start: -1,
+    end: -1,
+    selectedIndex: 0,
+    items: [],
+    textarea: null,
+  };
+  document.querySelectorAll("[data-comment-mention-suggestions]").forEach((container) => {
+    container.hidden = true;
+    container.innerHTML = "";
+  });
+}
+
+function renderCommentMentionSuggestions() {
+  const textarea = state.commentMention.textarea;
+  const container = textarea?.closest("form")?.querySelector("[data-comment-mention-suggestions]");
+  if (!container) return;
+  if (!state.commentMention.active || !state.commentMention.items.length) {
+    closeCommentMentionSuggestions();
+    return;
+  }
+
+  container.hidden = false;
+  container.innerHTML = state.commentMention.items.map((profile, index) => `
+    <button class="composer-mention-option${index === state.commentMention.selectedIndex ? " is-active" : ""}" type="button" data-comment-mention-index="${index}">
+      <span class="user-search-avatar">
+        <img src="${escapeHtml(profile.avatarUrl || "./assets/avatar.svg")}" alt="">
+      </span>
+      <span class="composer-mention-copy">
+        <strong>${escapeHtml(profile.displayName)}</strong>
+        <span>@${escapeHtml(profile.username)}</span>
+      </span>
+    </button>
+  `).join("");
+}
+
+function updateCommentMentionSuggestions(textarea) {
+  const activeMention = getActiveMention(textarea.value, textarea.selectionStart);
+  if (!activeMention) {
+    closeCommentMentionSuggestions();
+    return;
+  }
+
+  const items = getMentionMatches(activeMention.query);
+  if (!items.length) {
+    closeCommentMentionSuggestions();
+    return;
+  }
+
+  state.commentMention = {
+    active: true,
+    start: activeMention.start,
+    end: activeMention.end,
+    selectedIndex: Math.min(state.commentMention.selectedIndex || 0, items.length - 1),
+    items,
+    textarea,
+  };
+  renderCommentMentionSuggestions();
+}
+
+function insertCommentMention(profile) {
+  const textarea = state.commentMention.textarea;
+  if (!textarea || !profile || !state.commentMention.active) return;
+  const text = textarea.value;
+  const before = text.slice(0, state.commentMention.start);
+  const after = text.slice(state.commentMention.end);
+  const nextValue = `${before}@${profile.username} ${after}`;
+  const nextCursor = before.length + profile.username.length + 2;
+  textarea.value = nextValue.slice(0, Number(textarea.maxLength || 500));
+  closeCommentMentionSuggestions();
+  textarea.focus();
+  textarea.setSelectionRange(nextCursor, nextCursor);
 }
 
 function isPhoneContactSchemaError(error) {
@@ -254,7 +375,7 @@ async function loadProfileStats(client, profileId, viewerId) {
 async function loadProfilePosts(client, profileId) {
   const { data, error, count } = await client
     .from("public_feed_posts")
-    .select("id, profile_id, game_igdb_id, post_type, body, media_url, media_type, video_status, video_thumbnail_url, processing_error, comment_count, created_at, game_name, game_slug", { count: "exact" })
+    .select("id, profile_id, game_igdb_id, post_type, body, media_url, media_type, video_status, video_thumbnail_url, processing_error, comment_count, created_at, game_name, game_slug, game_cover_url", { count: "exact" })
     .eq("profile_id", profileId)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -275,8 +396,46 @@ async function loadProfilePosts(client, profileId) {
     gameId: post.game_igdb_id,
     gameName: post.game_name || "Game",
     gameSlug: post.game_slug || "",
+    gameCoverUrl: post.game_cover_url || "",
   }));
   state.postsCount = Number(count ?? state.posts.length);
+}
+
+async function loadFollowedProfiles(client, viewerId) {
+  if (!viewerId) {
+    state.followedProfiles = [];
+    return;
+  }
+
+  const { data: follows, error: followsError } = await client
+    .from("user_follows")
+    .select("following_id")
+    .eq("follower_id", viewerId)
+    .order("created_at", { ascending: false })
+    .limit(80);
+
+  if (followsError) throw followsError;
+
+  const followedIds = [...new Set((follows || [])
+    .map((row) => row.following_id)
+    .filter(Boolean))];
+
+  if (!followedIds.length) {
+    state.followedProfiles = [];
+    return;
+  }
+
+  const { data: profiles, error: profilesError } = await client
+    .from("public_profiles")
+    .select("id, display_name, username, avatar_url")
+    .in("id", followedIds);
+
+  if (profilesError) throw profilesError;
+
+  const byId = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  state.followedProfiles = followedIds
+    .map((id) => normalizeFollowedProfile(byId.get(id)))
+    .filter(Boolean);
 }
 
 async function hydrateAuthenticatedProfile() {
@@ -343,6 +502,7 @@ async function hydrateAuthenticatedProfile() {
     await Promise.all([
       loadProfileStats(client, profileResult.data.id, user?.id),
       loadProfilePosts(client, profileResult.data.id),
+      loadFollowedProfiles(client, user?.id),
     ]);
     applyProfile(profileResult.data, links || []);
 
@@ -385,6 +545,12 @@ function renderPublicInfo() {
   if (state.loading) return;
   if (state.profileMissing) return;
   const phoneDigits = profileInfo.phone.replace(/\D/g, "");
+  const getPlatformMeta = (platform) => {
+    const id = String(platform || "").toLowerCase();
+    if (id === "discord") return { id, label: "Discord", icon: "./assets/discord.svg" };
+    if (id === "twitch") return { id, label: "Twitch", icon: "./assets/twitch.svg" };
+    return { id, label: platform || "Plataforma", icon: "" };
+  };
   const phoneItem = profileInfo.phoneVisibility === "public" && profileInfo.phone
     ? `<a class="info-pill" href="tel:${escapeHtml(profileInfo.phone.replace(/\s/g, ""))}">${escapeHtml(profileInfo.phone)}</a>`
     : "";
@@ -404,6 +570,7 @@ function renderPublicInfo() {
   const accountItems = profileInfo.connectedAccounts.map((account) => {
     const platform = String(account.platform || "");
     const lowerPlatform = platform.toLowerCase();
+    const platformMeta = getPlatformMeta(platform);
     const handle = account.handle?.startsWith("@") ? account.handle : `@${account.handle || platform}`;
     const profileUrl = lowerPlatform === "discord" && account.externalUserId
       ? `discord://-/users/${account.externalUserId}`
@@ -414,9 +581,9 @@ function renderPublicInfo() {
       : "";
 
     return `
-      <${tag} class="info-pill platform-pill" ${attrs}>
-        <strong>${escapeHtml(account.platform)}</strong>
-        ${escapeHtml(handle)}
+      <${tag} class="info-pill platform-pill platform-pill-${escapeHtml(platformMeta.id)}" ${attrs} aria-label="${escapeHtml(`${platformMeta.label}: ${handle}`)}" title="${escapeHtml(`${platformMeta.label}: ${handle}`)}">
+        ${platformMeta.icon ? `<img src="${escapeHtml(platformMeta.icon)}" alt="" aria-hidden="true">` : `<strong>${escapeHtml(platformMeta.label.slice(0, 2).toUpperCase())}</strong>`}
+        <span>${escapeHtml(handle)}</span>
       </${tag}>
     `;
   }).join("");
@@ -539,23 +706,92 @@ function renderPostActions(post) {
   `;
 }
 
-function renderInlineCommentItem(comment) {
+function groupCommentsByParent(comments) {
+  return (comments || []).reduce((groups, comment) => {
+    const key = comment.parentCommentId || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(comment);
+    return groups;
+  }, new Map());
+}
+
+function getReplyMention(comment) {
+  const username = comment?.author?.username ? `@${comment.author.username} ` : "";
+  return escapeHtml(username);
+}
+
+function buildCommentsById(comments) {
+  return new Map((comments || []).map((comment) => [String(comment.id), comment]));
+}
+
+function renderCommentReplyReference(comment, commentsById) {
+  const parentId = comment.parentCommentId || "";
+  if (!parentId) return "";
+  const localParent = commentsById?.get(String(parentId));
+  const parent = localParent ? {
+    id: localParent.id,
+    status: "active",
+    author: localParent.author,
+  } : comment.parent;
+  if (!parent || parent.status !== "active") {
+    return `<span class="comment-reply-reference is-deleted">Em resposta a comentário excluído</span>`;
+  }
+  const parentAuthor = parent.author || {};
+  const label = parentAuthor.displayName || parentAuthor.username || "comentário";
+  return `<a class="comment-reply-reference" href="#comment-${escapeHtml(parentId)}">Em resposta a ${escapeHtml(label)}</a>`;
+}
+
+function renderInlineCommentReplyForm(postId, comment) {
+  if (String(state.replyingToCommentId) !== String(comment.id)) return "";
+  if (!state.session?.access_token) {
+    return `<a class="text-button inline-comment-login" href="./sign-in.html">Entre para responder</a>`;
+  }
+  const isSubmitting = String(state.commentSubmittingPostId) === String(comment.id);
+  return `
+    <form class="inline-comment-form inline-reply-form" data-inline-comment-form data-post-id="${escapeHtml(postId)}" data-parent-comment-id="${escapeHtml(comment.id)}">
+      <textarea maxlength="500" rows="2" placeholder="Responder comentário">${getReplyMention(comment)}</textarea>
+      <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
+      <div class="inline-comment-actions">
+        <button class="text-button" type="button" data-comment-reply-cancel>Cancelar</button>
+        <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>
+          ${isSubmitting ? "Respondendo..." : "Responder"}
+        </button>
+      </div>
+      <p class="field-feedback" data-inline-comment-feedback></p>
+    </form>
+  `;
+}
+
+function renderInlineCommentItem(comment, postId, commentsById) {
   const author = comment.author || {};
   const authorName = author.displayName || "Usuário Gimerr";
   const authorHandle = author.username ? `@${author.username}` : "";
+  const canDelete = state.session?.user?.id && String(author.id) === String(state.session.user.id);
   return `
-    <article class="comment-item inline-comment-item">
-      <a class="post-avatar" href="${getProfileUrl(author)}">
-        <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
-      </a>
-      <div class="comment-copy">
-        <div class="comment-meta">
-          <a href="${getProfileUrl(author)}">${escapeHtml(authorName)}</a>
-          <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
+    <div class="comment-thread">
+      <article class="comment-item inline-comment-item" id="comment-${escapeHtml(comment.id)}">
+        <a class="post-avatar" href="${getProfileUrl(author)}">
+          <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
+        </a>
+        <div class="comment-copy">
+          <div class="comment-meta">
+            <a href="${getProfileUrl(author)}">${escapeHtml(authorName)}</a>
+            <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
+          </div>
+          ${renderCommentReplyReference(comment, commentsById)}
+          <p>${renderTextWithMentions(comment.body, author.username)}</p>
+          <div class="comment-actions">
+            <button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>
+            ${canDelete ? `
+              <button class="comment-delete-button" type="button" data-comment-delete data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}" aria-label="Apagar comentário" title="Apagar comentário">
+                <img src="./assets/trash.svg" alt="">
+              </button>
+            ` : ""}
+          </div>
+          ${renderInlineCommentReplyForm(postId, comment)}
         </div>
-        <p>${renderTextWithMentions(comment.body, author.username)}</p>
-      </div>
-    </article>
+      </article>
+    </div>
   `;
 }
 
@@ -567,10 +803,11 @@ function renderInlineCommentsPanel(post) {
   const isLoading = String(state.commentsLoadingPostId) === postId;
   const error = state.commentsErrorByPost[postId] || "";
   const comments = commentState.items || [];
+  const commentsById = buildCommentsById(comments);
   const body = error
     ? `<p class="comments-empty">${escapeHtml(error)}</p>`
     : comments.length
-      ? comments.map(renderInlineCommentItem).join("")
+      ? comments.map((comment) => renderInlineCommentItem(comment, postId, commentsById)).join("")
       : `<p class="comments-empty">${isLoading ? "Carregando comentários..." : "Nenhum comentário ainda."}</p>`;
   const moreButton = commentState.hasMore
     ? `<button class="text-button inline-comments-more" type="button" data-post-comments-more data-post-id="${escapeHtml(postId)}" ${isLoading ? "disabled" : ""}>${isLoading ? "Carregando..." : "Ver mais comentários"}</button>`
@@ -625,6 +862,7 @@ function renderInlineCommentForm(post) {
   return `
     <form class="inline-comment-form" data-inline-comment-form data-post-id="${escapeHtml(post.id)}">
       <textarea maxlength="500" rows="2" placeholder="Escreva um comentário"></textarea>
+      <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
       <div class="inline-comment-actions">
         <span>Até 500 caracteres.</span>
         <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>
@@ -638,6 +876,8 @@ function renderInlineCommentForm(post) {
 
 async function submitInlineComment(form) {
   const postId = form.dataset.postId || "";
+  const parentCommentId = form.dataset.parentCommentId || "";
+  const submitKey = parentCommentId || postId;
   const textarea = form.querySelector("textarea");
   const feedback = form.querySelector("[data-inline-comment-feedback]");
   const body = textarea?.value?.trim() || "";
@@ -646,7 +886,7 @@ async function submitInlineComment(form) {
     return;
   }
 
-  state.commentSubmittingPostId = postId;
+  state.commentSubmittingPostId = submitKey;
   const submitButton = form.querySelector('button[type="submit"]');
   if (submitButton) {
     submitButton.disabled = true;
@@ -661,7 +901,7 @@ async function submitInlineComment(form) {
         authorization: `Bearer ${state.session.access_token}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ postId, body }),
+      body: JSON.stringify({ postId, body, parentCommentId: parentCommentId || null }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Não foi possível comentar.");
@@ -678,9 +918,17 @@ async function submitInlineComment(form) {
         nextOffset: Number(state.commentsByPost[postId].nextOffset || 0) + 1,
       };
     }
-    state.activeCommentPostId = "";
+    if (parentCommentId) {
+      state.replyingToCommentId = "";
+    } else {
+      state.activeCommentPostId = "";
+    }
   } catch (error) {
-    state.activeCommentPostId = postId;
+    if (parentCommentId) {
+      state.replyingToCommentId = parentCommentId;
+    } else {
+      state.activeCommentPostId = postId;
+    }
     if (feedback) {
       feedback.textContent = error.message || "Não foi possível comentar.";
       feedback.className = "field-feedback is-error";
@@ -691,8 +939,64 @@ async function submitInlineComment(form) {
     }
   } finally {
     state.commentSubmittingPostId = "";
-    if (String(state.activeCommentPostId) !== String(postId)) renderFeed({ prepareVideos: false });
+    if (String(state.activeCommentPostId) !== String(postId) || parentCommentId) renderFeed({ prepareVideos: false });
   }
+}
+
+function removeCommentsFromList(comments, deletedIds) {
+  const ids = new Set((deletedIds || []).map(String));
+  return (comments || [])
+    .filter((comment) => !ids.has(String(comment.id)))
+    .map((comment) => (
+      ids.has(String(comment.parentCommentId))
+        ? {
+          ...comment,
+          parent: {
+            id: comment.parentCommentId,
+            status: "deleted",
+            body: "",
+            author: {},
+          },
+        }
+        : comment
+    ));
+}
+
+async function deleteInlineComment(postId, commentId) {
+  if (!state.session?.access_token) return;
+  const confirmed = window.confirm("Apagar este comentário?");
+  if (!confirmed) return;
+
+  const response = await fetch("/api/posts/comment-delete", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${state.session.access_token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ commentId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Não foi possível apagar comentário.");
+
+  const deletedIds = payload.deletedCommentIds || [commentId];
+  const deletedCount = Number(payload.deletedCount || deletedIds.length || 1);
+  if (state.commentsByPost[postId]?.items) {
+    state.commentsByPost[postId] = {
+      ...state.commentsByPost[postId],
+      items: removeCommentsFromList(state.commentsByPost[postId].items, deletedIds),
+      nextOffset: Math.max(0, Number(state.commentsByPost[postId].nextOffset || 0) - deletedCount),
+    };
+  }
+  state.posts = state.posts.map((post) => (
+    String(post.id) === String(postId)
+      ? { ...post, commentCount: Math.max(0, Number(post.commentCount || 0) - deletedCount) }
+      : post
+  ));
+  if (deletedIds.map(String).includes(String(state.replyingToCommentId))) {
+    state.replyingToCommentId = "";
+  }
+  renderFeed({ prepareVideos: false });
 }
 
 async function reportPost(postId) {
@@ -772,6 +1076,7 @@ function renderFeed({ prepareVideos = true } = {}) {
       <article class="post-card">
         ${media}
         <div class="post-body">
+          ${post.type === "listing" ? `<span class="post-marketplace-badge">Anúncio</span>` : ""}
           ${renderMentionLine(authorName, profileInfo.username, post)}
           <div class="post-meta">
             <a class="author-block" href="${profileUrl}">
@@ -791,7 +1096,9 @@ function renderFeed({ prepareVideos = true } = {}) {
             ${post.body ? `<p class="post-text">${escapeHtml(post.body)}</p>` : ""}
           </div>
           <a class="channel-line" href="${gameUrl}">
-            <span class="channel-dot" aria-hidden="true"></span>
+            <span class="channel-game-logo" aria-hidden="true">
+              <img src="${escapeHtml(post.gameCoverUrl || "./assets/avatar.svg")}" alt="">
+            </span>
             <span>${escapeHtml(post.gameName)}</span>
           </a>
           ${renderPostActions(post)}
@@ -948,8 +1255,13 @@ document.addEventListener("click", async (event) => {
   if (commentToggle) {
     event.preventDefault();
     const postId = commentToggle.dataset.postId || "";
-    state.activeCommentPostId = String(state.activeCommentPostId) === String(postId) ? "" : postId;
+    const willOpen = String(state.activeCommentPostId) !== String(postId);
+    state.activeCommentPostId = willOpen ? postId : "";
+    if (willOpen) state.activeCommentsPostId = postId;
     renderFeed({ prepareVideos: false });
+    if (willOpen && !state.commentsByPost[postId]) {
+      await loadInlineComments(postId);
+    }
     window.setTimeout(() => {
       document.querySelector(`[data-inline-comment-form][data-post-id="${CSS.escape(postId)}"] textarea`)?.focus();
     });
@@ -973,6 +1285,42 @@ document.addEventListener("click", async (event) => {
   if (commentsMoreButton) {
     event.preventDefault();
     await loadInlineComments(commentsMoreButton.dataset.postId || "", { append: true });
+    return;
+  }
+
+  const commentDeleteButton = target.closest("[data-comment-delete]");
+  if (commentDeleteButton) {
+    event.preventDefault();
+    try {
+      await deleteInlineComment(commentDeleteButton.dataset.postId || "", commentDeleteButton.dataset.commentId || "");
+    } catch (error) {
+      console.warn("Não foi possível apagar comentário.", error);
+      window.alert(error.message || "Não foi possível apagar comentário.");
+    }
+    return;
+  }
+
+  const replyButton = target.closest("[data-comment-reply]");
+  if (replyButton) {
+    event.preventDefault();
+    const postId = replyButton.dataset.postId || "";
+    const commentId = replyButton.dataset.commentId || "";
+    state.activeCommentsPostId = postId;
+    state.replyingToCommentId = String(state.replyingToCommentId) === String(commentId) ? "" : commentId;
+    renderFeed({ prepareVideos: false });
+    window.setTimeout(() => {
+      const textarea = document.querySelector(`[data-parent-comment-id="${CSS.escape(commentId)}"] textarea`);
+      textarea?.focus();
+      textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
+    return;
+  }
+
+  const replyCancelButton = target.closest("[data-comment-reply-cancel]");
+  if (replyCancelButton) {
+    event.preventDefault();
+    state.replyingToCommentId = "";
+    renderFeed({ prepareVideos: false });
     return;
   }
 
@@ -1014,10 +1362,47 @@ document.addEventListener("submit", async (event) => {
   await submitInlineComment(form);
 });
 
+document.addEventListener("input", (event) => {
+  const textarea = event.target instanceof Element ? event.target.closest("[data-inline-comment-form] textarea") : null;
+  if (!textarea) return;
+  updateCommentMentionSuggestions(textarea);
+});
+
+document.addEventListener("mousedown", (event) => {
+  const button = event.target instanceof Element
+    ? event.target.closest("[data-comment-mention-index]")
+    : null;
+  if (!button) return;
+  event.preventDefault();
+  const profile = state.commentMention.items[Number(button.dataset.commentMentionIndex || 0)];
+  insertCommentMention(profile);
+});
+
 document.addEventListener("keydown", (event) => {
+  const textarea = event.target instanceof Element ? event.target.closest("[data-inline-comment-form] textarea") : null;
+  if (textarea && state.commentMention.active && state.commentMention.items.length) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      state.commentMention.selectedIndex = (state.commentMention.selectedIndex + 1) % state.commentMention.items.length;
+      renderCommentMentionSuggestions();
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      state.commentMention.selectedIndex = (state.commentMention.selectedIndex - 1 + state.commentMention.items.length) % state.commentMention.items.length;
+      renderCommentMentionSuggestions();
+      return;
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      insertCommentMention(state.commentMention.items[state.commentMention.selectedIndex]);
+      return;
+    }
+  }
   if (event.key === "Escape") {
     if (!els.peopleModal.hidden) closePeopleModal();
     closePostMenus();
+    closeCommentMentionSuggestions();
   }
 });
 

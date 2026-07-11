@@ -1056,6 +1056,18 @@ select {
   color: var(--blue);
 }
 
+.verification-action-button img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+#verification-primary img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
 .verification-action-button.discord {
   background: #5865f2;
   border-color: #5865f2;
@@ -3020,6 +3032,26 @@ video.media-frame {
 .auth-form-heading h2 {
   font-size: 1.45rem;
   font-weight: 400;
+}
+
+.discord-verify-confirmation {
+  justify-items: center;
+  text-align: center;
+}
+
+.verify-loader {
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--line);
+  border-top-color: #5865f2;
+  border-radius: 999px;
+  animation: verify-spin 0.8s linear infinite;
+}
+
+@keyframes verify-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .auth-form-heading p,

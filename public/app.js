@@ -1,5 +1,7 @@
 let posts = [];
 
+const DISCORD_INVITE_FALLBACK = "https://discord.gg/tCPVFu6juS";
+
 const state = {
   filter: "all",
   search: "",
@@ -264,50 +266,43 @@ function setVerificationFeedback(message, tone = "") {
   els.verificationFeedback.className = `field-feedback${tone ? ` is-${tone}` : ""}`;
 }
 
+function getVerificationInviteUrl(status = {}) {
+  return status.serverInviteUrl || DISCORD_INVITE_FALLBACK;
+}
+
 function renderVerificationSteps(status = {}) {
-  const channelName = status.verifyChannelName || "verify";
-  const discordButtonLabel = status.discordLinked ? "Discord conectado" : "Conectar Discord";
-  const discordButtonMeta = status.discordLinked && status.discordHandle ? status.discordHandle : "Auth do Discord";
-  const inviteButton = status.serverInviteUrl
-    ? `<a class="verification-action-button" href="${escapeHtml(status.serverInviteUrl)}" target="_blank" rel="noopener">
+  const channelName = status.verifyChannelName || "gimerr-verification";
+  const inviteUrl = getVerificationInviteUrl(status);
+  const inviteButton = inviteUrl
+    ? `<a class="verification-action-button" href="${escapeHtml(inviteUrl)}" target="_blank" rel="noopener">
+        <img src="/assets/share.svg" width="18" height="18" alt="">
         <span>Entrar no servidor oficial</span>
       </a>`
     : "";
-  const inviteStep = `<div class="verification-step">
-    <strong>2. Entre no servidor oficial do Gimerr</strong>
-    <span>O servidor usa a verificação do próprio Discord para reduzir spam e contas falsas.</span>
-    ${inviteButton || "<span>O convite do servidor oficial ainda não está configurado.</span>"}
-  </div>`;
-  const botStep = status.discordLinked
-    ? `<div class="verification-step">
-        <strong>3. Confirme sua conta no canal #${escapeHtml(channelName)}</strong>
-        <span>Depois de entrar no servidor, clique no botão <code>Verify Gimerr Account</code> no canal #${escapeHtml(channelName)}. O bot envia um link seguro para autenticar este mesmo Discord no Gimerr.</span>
-      </div>`
-    : `<div class="verification-step is-disabled">
-        <strong>3. Confirme sua conta com o bot</strong>
-        <span>Essa etapa aparece depois que sua conta Discord estiver conectada.</span>
-      </div>`;
 
   els.verificationSteps.innerHTML = `
-    <div class="verification-step">
-      <strong>1. Conecte seu Discord</strong>
-      <button class="verification-action-button discord" type="button" data-verification-action="connect">
-        <img src="/assets/discord.svg" width="20" height="20" alt="">
-        <span>${escapeHtml(discordButtonLabel)}</span>
-        <small>${escapeHtml(discordButtonMeta)}</small>
-      </button>
-    </div>
-    ${inviteStep}
-    ${botStep}
+  <div class="verification-step">
+    <strong>1. Entre no servidor oficial do Gimerr</strong>
+    <span>O servidor usa a verificação do próprio Discord para reduzir spam e contas falsas.</span>
+    ${inviteButton || "<span>O convite do servidor oficial ainda não está configurado.</span>"}
+  </div>
+  <div class="verification-step">
+    <strong>2. Clique no botão do bot no canal #${escapeHtml(channelName)}</strong>
+    <span>No canal #${escapeHtml(channelName)}, clique em <code>Verify with Gimerr</code>. O bot enviará um link seguro só para você.</span>
+  </div>
+  <div class="verification-step">
+    <strong>3. Entre no Gimerr com Discord</strong>
+    <span>Abra o link enviado pelo bot e autentique com o mesmo Discord usado no servidor. Depois disso sua conta será liberada para publicar.</span>
+  </div>
   `;
 }
 
 function openVerificationModal(status = {}) {
   renderVerificationSteps(status);
   setVerificationFeedback("");
-  els.verificationPrimary.textContent = status.discordLinked ? "Abrir servidor do Discord" : "Verificar com Discord";
-  els.verificationPrimary.dataset.action = status.discordLinked ? "open_invite" : "connect";
-  els.verificationPrimary.dataset.invite = status.serverInviteUrl || "";
+  els.verificationPrimary.innerHTML = `<img src="/assets/share.svg" width="18" height="18" alt=""><span>Abrir servidor do Discord</span>`;
+  els.verificationPrimary.dataset.action = "open_invite";
+  els.verificationPrimary.dataset.invite = getVerificationInviteUrl(status);
   els.verificationPrimary.dataset.code = "";
   els.verificationModal.hidden = false;
   els.verificationPrimary.focus();
@@ -369,7 +364,7 @@ async function generateDiscordVerificationCode() {
         <span class="verification-code">${escapeHtml(payload.code)}</span>
       </div>
       <div class="verification-step">
-        <strong>Envie no canal #${escapeHtml(payload.verifyChannelName || "verify")}</strong>
+        <strong>Envie no canal #${escapeHtml(payload.verifyChannelName || "gimerr-verification")}</strong>
         <span>Entre no servidor oficial do Gimerr e envie exatamente este código no canal de verificação.</span>
         ${invite}
       </div>
@@ -868,8 +863,10 @@ els.verificationSteps.addEventListener("click", async (event) => {
   if (!button) return;
 
   try {
-    if (button.dataset.verificationAction === "connect") {
-      await startDiscordVerification();
+    if (button.dataset.verificationAction === "open_invite") {
+      const invite = button.dataset.invite || "";
+      if (!invite) throw new Error("Convite do servidor oficial ainda não configurado.");
+      window.open(invite, "_blank", "noopener");
     }
   } catch (error) {
     setVerificationFeedback(error.message || "Não foi possível continuar a verificação.", "error");
@@ -878,20 +875,10 @@ els.verificationSteps.addEventListener("click", async (event) => {
 els.verificationPrimary.addEventListener("click", async () => {
   try {
     const action = els.verificationPrimary.dataset.action || "connect";
-    if (action === "connect") {
-      await startDiscordVerification();
-    } else if (action === "challenge") {
-      await generateDiscordVerificationCode();
-    } else if (action === "open_invite") {
+    if (action === "open_invite") {
       const invite = els.verificationPrimary.dataset.invite || "";
       if (!invite) throw new Error("Convite do servidor oficial ainda não configurado.");
       window.open(invite, "_blank", "noopener");
-    } else if (action === "copy_verify_command") {
-      await copyTextToClipboard("verificar");
-      setVerificationFeedback("Mensagem copiada. Cole no canal #verify do servidor oficial.", "success");
-    } else if (action === "copy") {
-      await copyTextToClipboard(els.verificationPrimary.dataset.code || "");
-      setVerificationFeedback("Código copiado.", "success");
     }
   } catch (error) {
     setVerificationFeedback(error.message || "Não foi possível continuar a verificação.", "error");

@@ -120,7 +120,7 @@ export async function onRequestPost({ request, env }) {
       expiresAt: challenge.expires_at,
       serverInviteUrl,
       serverInviteConfigured: Boolean(serverInviteUrl),
-      verifyChannelName: env.DISCORD_VERIFY_CHANNEL_NAME || "verify",
+      verifyChannelName: env.DISCORD_VERIFY_CHANNEL_NAME || "gimerr-verification",
     });
   } catch (error) {
     return jsonResponse({

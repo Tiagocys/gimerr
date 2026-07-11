@@ -1,6 +1,8 @@
 const feedback = document.querySelector("#discord-verify-feedback");
 const authButton = document.querySelector("#discord-verify-auth");
 const homeButton = document.querySelector("#discord-verify-home");
+const title = document.querySelector("#verify-title");
+const summary = document.querySelector("#discord-verify-summary");
 
 function getToken() {
   return new URLSearchParams(window.location.search).get("token") || "";
@@ -15,6 +17,12 @@ function setLoading(isLoading, label = "Verificando...") {
   authButton.disabled = isLoading;
   authButton.classList.toggle("is-loading", isLoading);
   authButton.querySelector("span").textContent = isLoading ? label : "Continuar com Discord";
+}
+
+function redirectToFeedSoon() {
+  window.setTimeout(() => {
+    window.location.assign("/");
+  }, 1800);
 }
 
 async function signInWithDiscord() {
@@ -54,6 +62,8 @@ async function completeVerification() {
     const { data } = await window.GimerrAuth.getSession();
     if (!data.session) {
       setLoading(false);
+      title.textContent = "Confirme seu Discord.";
+      summary.textContent = "Entre com o mesmo Discord usado no servidor oficial do Gimerr.";
       setFeedback("Entre com Discord para concluir a verificação.");
       return;
     }
@@ -77,10 +87,13 @@ async function completeVerification() {
       throw new Error(payload.error || "Não foi possível concluir a verificação.");
     }
 
-    setFeedback("Conta verificada. Você já pode publicar no Gimerr.", "success");
+    title.textContent = "Sua conta foi verificada.";
+    summary.textContent = "Você será redirecionado para o Gimerr em instantes...";
+    setFeedback("", "success");
     authButton.hidden = true;
     homeButton.hidden = false;
     window.history.replaceState({}, document.title, `${window.location.origin}${window.location.pathname}`);
+    redirectToFeedSoon();
   } catch (error) {
     setLoading(false);
     setFeedback(error.message || "Não foi possível concluir a verificação.", "error");

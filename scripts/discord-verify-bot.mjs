@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import WebSocket from "ws";
 
 const DISCORD_API = "https://discord.com/api/v10";
 const DISCORD_GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
@@ -292,7 +293,7 @@ async function handleVerifyInteraction({ apiBase, token, interaction }) {
   if (response.ok) {
     await editInteractionResponse(
       interaction,
-      "Abra o Gimerr e entre com este mesmo Discord para concluir a verificação.",
+      "",
       [
         {
           type: 1,
@@ -332,7 +333,7 @@ async function shouldHandleMessage(message, channelCache) {
   const configuredChannelId = process.env.DISCORD_VERIFY_CHANNEL_ID;
   if (configuredChannelId) return message.channel_id === configuredChannelId;
 
-  const expectedName = process.env.DISCORD_VERIFY_CHANNEL_NAME || "verify";
+  const expectedName = process.env.DISCORD_VERIFY_CHANNEL_NAME || "gimerr-verification";
   const channelName = await getChannelName(message.channel_id, channelCache).catch(() => "");
   return channelName === expectedName;
 }
@@ -350,12 +351,12 @@ function connectGateway() {
   let heartbeatTimer = null;
   let lastSequence = null;
 
-  socket.addEventListener("open", () => {
+  socket.on("open", () => {
     console.log("[discord-verify-bot] conectado ao gateway");
   });
 
-  socket.addEventListener("message", async (event) => {
-    const packet = JSON.parse(event.data);
+  socket.on("message", async (data) => {
+    const packet = JSON.parse(data.toString());
     if (packet.s) lastSequence = packet.s;
 
     if (packet.op === 10) {
@@ -392,7 +393,7 @@ function connectGateway() {
       const configuredGuildId = process.env.DISCORD_GUILD_ID;
       if (configuredGuildId && guild.id !== configuredGuildId) return;
 
-      const expectedName = process.env.DISCORD_VERIFY_CHANNEL_NAME || "verify";
+      const expectedName = process.env.DISCORD_VERIFY_CHANNEL_NAME || "gimerr-verification";
       const channel = (guild.channels || []).find((item) => (
         item.type === DISCORD_TEXT_CHANNEL_TYPE && item.name === expectedName
       ));
@@ -422,14 +423,14 @@ function connectGateway() {
     }
   });
 
-  socket.addEventListener("close", async () => {
+  socket.on("close", async () => {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     console.warn("[discord-verify-bot] conexão encerrada, tentando reconectar em 5s");
     await sleep(5000);
     connectGateway();
   });
 
-  socket.addEventListener("error", (error) => {
+  socket.on("error", (error) => {
     console.error("[discord-verify-bot] erro no gateway", error);
   });
 }

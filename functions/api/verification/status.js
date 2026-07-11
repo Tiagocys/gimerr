@@ -49,7 +49,7 @@ export async function onRequestGet({ request, env }) {
       verifiedAt: profile.verified_at || null,
       serverInviteUrl,
       serverInviteConfigured: Boolean(serverInviteUrl),
-      verifyChannelName: env.DISCORD_VERIFY_CHANNEL_NAME || "verify",
+      verifyChannelName: env.DISCORD_VERIFY_CHANNEL_NAME || "gimerr-verification",
     });
   } catch (error) {
     return jsonResponse({

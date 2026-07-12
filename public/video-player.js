@@ -3,6 +3,7 @@
   let configPromise = null;
   let scriptPromise = null;
   let videoCounter = 0;
+  let viewerToken = "";
 
   function getConfig() {
     if (!configPromise) {
@@ -60,6 +61,70 @@
     video.removeAttribute("src");
     video.appendChild(nextSource);
     video.load();
+  }
+
+  function formatVideoViewCount(value) {
+    const count = Number(value || 0);
+    const formatted = new Intl.NumberFormat("pt-BR").format(count);
+    return count === 1 ? "1 visualização" : `${formatted} visualizações`;
+  }
+
+  function getViewerToken() {
+    if (viewerToken) return viewerToken;
+    const key = "gimerr-video-viewer-token";
+    viewerToken = localStorage.getItem(key) || "";
+    if (!viewerToken) {
+      viewerToken = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      localStorage.setItem(key, viewerToken);
+    }
+    return viewerToken;
+  }
+
+  function updateVideoViewCount(postId, count) {
+    document.querySelectorAll("[data-video-view-count]").forEach((element) => {
+      if (element.dataset.postId !== postId) return;
+      element.textContent = formatVideoViewCount(count);
+    });
+    document.dispatchEvent(new CustomEvent("gimerr:video-view", {
+      detail: {
+        postId,
+        videoViewCount: Number(count || 0),
+      },
+    }));
+  }
+
+  async function getAuthHeader() {
+    if (!window.GimerrAuth?.getSession) return {};
+    const { data } = await window.GimerrAuth.getSession().catch(() => ({ data: null }));
+    return data?.session?.access_token
+      ? { authorization: `Bearer ${data.session.access_token}` }
+      : {};
+  }
+
+  async function recordVideoView(target) {
+    const postId = target?.dataset?.videoPostId || target?.closest?.("[data-video-post-id]")?.dataset?.videoPostId || "";
+    if (!postId || target.dataset.videoViewRecorded === "true") return;
+    target.dataset.videoViewRecorded = "true";
+
+    try {
+      const response = await fetch("/api/posts/video-view", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          ...(await getAuthHeader()),
+        },
+        body: JSON.stringify({
+          postId,
+          viewerToken: getViewerToken(),
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Não foi possível registrar visualização.");
+      updateVideoViewCount(postId, payload.videoViewCount);
+    } catch (error) {
+      console.warn("Não foi possível registrar visualização do vídeo.", error);
+    }
   }
 
   function getPlayerOptions(config, video) {
@@ -176,6 +241,7 @@
     video.className = "media-frame";
     video.dataset.fluidVideo = "true";
     video.dataset.mediaType = button.dataset.videoType || "video/mp4";
+    video.dataset.videoPostId = button.dataset.videoPostId || "";
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";
@@ -187,6 +253,7 @@
     video.appendChild(source);
 
     button.replaceWith(video);
+    recordVideoView(video);
     await initializeVideo(video);
     video.play().catch(() => {});
   }
@@ -204,7 +271,10 @@
       return;
     }
     const video = event.target instanceof Element ? event.target.closest("video[data-fluid-video]") : null;
-    if (video) initializeVideo(video);
+    if (video) {
+      recordVideoView(video);
+      initializeVideo(video);
+    }
   }, { capture: true });
 
   document.addEventListener("click", (event) => {
@@ -214,7 +284,10 @@
 
   document.addEventListener("focusin", (event) => {
     const video = event.target instanceof Element ? event.target.closest("video[data-fluid-video]") : null;
-    if (video) initializeVideo(video);
+    if (video) {
+      recordVideoView(video);
+      initializeVideo(video);
+    }
   });
 
   document.addEventListener("DOMContentLoaded", () => prepare(document));

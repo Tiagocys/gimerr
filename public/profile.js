@@ -2,6 +2,7 @@ const profileInfo = {
   id: "",
   displayName: "",
   username: "",
+  avatarUrl: "",
   phone: "",
   phoneVisibility: "private",
   phoneContactWhatsapp: false,
@@ -170,10 +171,13 @@ function renderImageGalleryAttrs(items) {
 function renderVideoPoster(post, item) {
   const poster = post.videoThumbnailUrl || "";
   return `
-    <button class="video-lazy-button media-frame" type="button" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
-      ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
-      <span class="video-lazy-play" aria-hidden="true"></span>
-    </button>
+    <div class="video-media" data-video-view-container data-post-id="${escapeHtml(post.id || "")}">
+      <button class="video-lazy-button media-frame" type="button" data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
+        ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
+        <span class="video-lazy-play" aria-hidden="true"></span>
+      </button>
+      <span class="video-view-counter" data-video-view-count data-post-id="${escapeHtml(post.id || "")}">${escapeHtml(formatVideoViewCount(post.videoViewCount))}</span>
+    </div>
   `;
 }
 
@@ -355,6 +359,7 @@ function applyProfile(profile, links = []) {
   profileInfo.id = profile.id;
   profileInfo.displayName = displayName;
   profileInfo.username = profile.username || "";
+  profileInfo.avatarUrl = profile.avatar_url || "";
   profileInfo.phone = profile.phone_e164 || "";
   profileInfo.phoneVisibility = profile.phone_e164 ? "public" : "private";
   profileInfo.phoneContactWhatsapp = Boolean(profile.phone_contact_whatsapp);
@@ -438,7 +443,7 @@ async function loadProfileStats(client, profileId, viewerId) {
 async function loadProfilePosts(client, profileId) {
   const { data, error, count } = await client
     .from("public_feed_posts")
-    .select("id, profile_id, game_igdb_id, post_type, body, media_url, media_type, media_items, video_status, video_thumbnail_url, processing_error, comment_count, created_at, game_name, game_slug, game_cover_url", { count: "exact" })
+    .select("id, profile_id, game_igdb_id, post_type, body, media_url, media_type, media_items, video_status, video_thumbnail_url, processing_error, comment_count, video_view_count, created_at, game_name, game_slug, game_cover_url", { count: "exact" })
     .eq("profile_id", profileId)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -456,6 +461,7 @@ async function loadProfilePosts(client, profileId) {
     videoThumbnailUrl: post.video_thumbnail_url || "",
     processingError: post.processing_error || "",
     commentCount: Number(post.comment_count || 0),
+    videoViewCount: Number(post.video_view_count || 0),
     createdAt: post.created_at,
     gameId: post.game_igdb_id,
     gameName: post.game_name || "Game",
@@ -747,6 +753,12 @@ function formatCommentCount(value) {
   if (count === 0) return "0 comentários";
   if (count === 1) return "1 comentário";
   return `${new Intl.NumberFormat("pt-BR").format(count)} comentários`;
+}
+
+function formatVideoViewCount(value) {
+  const count = Number(value || 0);
+  const formatted = new Intl.NumberFormat("pt-BR").format(count);
+  return count === 1 ? "1 visualização" : `${formatted} visualizações`;
 }
 
 function renderPostActions(post) {
@@ -1464,6 +1476,17 @@ document.addEventListener("keydown", (event) => {
     closePostMenus();
     closeCommentMentionSuggestions();
   }
+});
+
+document.addEventListener("gimerr:video-view", (event) => {
+  const postId = event.detail?.postId;
+  const videoViewCount = Number(event.detail?.videoViewCount || 0);
+  if (!postId) return;
+  state.posts = state.posts.map((post) => (
+    String(post.id) === String(postId)
+      ? { ...post, videoViewCount }
+      : post
+  ));
 });
 
 async function init() {

@@ -461,6 +461,12 @@
     return `${new Intl.NumberFormat("pt-BR").format(count)} comentários`;
   }
 
+  function formatVideoViewCount(value) {
+    const count = Number(value || 0);
+    const formatted = new Intl.NumberFormat("pt-BR").format(count);
+    return count === 1 ? "1 visualização" : `${formatted} visualizações`;
+  }
+
   function renderPostActions(post) {
     const postId = escapeHtml(post.id);
     return `
@@ -518,10 +524,13 @@
   function renderVideoPoster(post, item) {
     const poster = post.videoThumbnailUrl || "";
     return `
-      <button class="video-lazy-button media-frame" type="button" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
-        ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
-        <span class="video-lazy-play" aria-hidden="true"></span>
-      </button>
+      <div class="video-media" data-video-view-container data-post-id="${escapeHtml(post.id || "")}">
+        <button class="video-lazy-button media-frame" type="button" data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
+          ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
+          <span class="video-lazy-play" aria-hidden="true"></span>
+        </button>
+        <span class="video-view-counter" data-video-view-count data-post-id="${escapeHtml(post.id || "")}">${escapeHtml(formatVideoViewCount(post.videoViewCount))}</span>
+      </div>
     `;
   }
 
@@ -1541,6 +1550,17 @@
     }
     if (event.key === "Escape") closePostMenus();
     if (event.key === "Escape") closeCommentMentionSuggestions();
+  });
+
+  document.addEventListener("gimerr:video-view", (event) => {
+    const postId = event.detail?.postId;
+    const videoViewCount = Number(event.detail?.videoViewCount || 0);
+    if (!postId) return;
+    state.feed = state.feed.map((post) => (
+      String(post.id) === String(postId)
+        ? { ...post, videoViewCount }
+        : post
+    ));
   });
 
   if (!redirectLegacySharedPostUrl()) loadGame();

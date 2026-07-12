@@ -44,8 +44,7 @@
   }
 
   function getAvatarUrl(user, profile) {
-    const metadata = user?.user_metadata || {};
-    return profile?.avatar_url || metadata.avatar_url || "";
+    return profile?.avatar_url || "./assets/avatar.svg";
   }
 
   function getPublicProfileUrl(user, profile) {
@@ -215,7 +214,7 @@
     ensureNotificationMenu().hidden = false;
     accountMenu.innerHTML = `
       <button class="account-avatar-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Abrir menu da conta">
-        ${avatarUrl ? `<img src="${avatarUrl}" alt="">` : `<span>${initials}</span>`}
+        <img src="${escapeHtml(avatarUrl || "./assets/avatar.svg")}" alt="${escapeHtml(displayName)}">
       </button>
       <div class="account-dropdown" role="menu">
         <a href="${profileUrl}" role="menuitem">Ver meu perfil</a>
@@ -280,6 +279,17 @@
       setNotificationsOpen(false);
     }
   });
+
+  document.addEventListener("error", (event) => {
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement)) return;
+    const isUserAvatar = image.closest(
+      ".account-avatar-button, .post-avatar, .profile-avatar-large, .user-search-avatar, .notification-avatar, .media-lightbox-avatar",
+    );
+    if (!isUserAvatar || image.dataset.avatarFallbackApplied === "true") return;
+    image.dataset.avatarFallbackApplied = "true";
+    image.src = "./assets/avatar.svg";
+  }, true);
 
   topActions.addEventListener("click", (event) => {
     const notificationButton = event.target.closest("[data-notifications-button]");

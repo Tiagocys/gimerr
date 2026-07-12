@@ -27,7 +27,6 @@ const POST_HTML_FALLBACK = `<!DOCTYPE html>
       </div>
 
       <nav class="top-actions" aria-label="Ações principais">
-        <a class="text-button" href="/index.html">Feed</a>
         <a class="auth-button" href="/sign-in.html" hidden>Entrar</a>
         <div class="account-menu" data-account-menu hidden></div>
       </nav>

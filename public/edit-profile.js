@@ -480,9 +480,9 @@ async function loadProfile() {
   els.phoneTelegram.checked = Boolean(data?.phone_contact_telegram);
   setPhoneVisibility(Boolean(data?.phone_is_public));
 
-  state.avatarUrl = data?.avatar_url || metadata.avatar_url || null;
+  state.avatarUrl = data?.avatar_url || null;
 
-  if (state.avatarUrl) els.avatarPreview.src = state.avatarUrl;
+  els.avatarPreview.src = state.avatarUrl || "./assets/avatar.svg";
 
   updateUsernameChangeState();
   syncPlatformState(platformLinks || []);

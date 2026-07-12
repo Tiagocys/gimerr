@@ -27,6 +27,7 @@ function toPublicPost(row) {
     readyMediaUrl: row.ready_media_url,
     videoThumbnailUrl: row.video_thumbnail_url,
     commentCount: Number(row.comment_count || 0),
+    videoViewCount: Number(row.video_view_count || 0),
     processingError: row.processing_error,
     createdAt: row.created_at,
     author: {

@@ -203,7 +203,6 @@ async function fetchProfile(env, profileId) {
 async function createProfileFromAuth(env, user) {
   const baseUsername = getAuthUsername(user);
   const displayName = getAuthDisplayName(user);
-  const avatarUrl = user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const suffix = attempt === 0 ? "" : `_${String(user.id).replace(/-/g, "").slice(attempt, attempt + 4)}`;
@@ -216,7 +215,7 @@ async function createProfileFromAuth(env, user) {
         id: user.id,
         display_name: displayName,
         username,
-        avatar_url: avatarUrl,
+        avatar_url: null,
       }),
     });
     const rows = await response.json().catch(() => []);

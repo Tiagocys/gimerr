@@ -8,6 +8,11 @@ function cleanText(value, maxLength) {
     .slice(0, maxLength);
 }
 
+function cleanUuid(value) {
+  const text = cleanText(value, 120);
+  return text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || "";
+}
+
 function toPublicPost(row) {
   return {
     id: row.id,
@@ -42,7 +47,7 @@ function toPublicPost(row) {
 export async function onRequestGet({ request, env }) {
   try {
     const requestUrl = new URL(request.url);
-    const postId = cleanText(requestUrl.searchParams.get("id") || requestUrl.searchParams.get("post"), 80);
+    const postId = cleanUuid(requestUrl.searchParams.get("id") || requestUrl.searchParams.get("post"));
     if (!postId) {
       return jsonResponse({ error: "Post inválido." }, { status: 400 });
     }

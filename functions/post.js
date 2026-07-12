@@ -1,11 +1,65 @@
 import { getSupabaseRestUrl } from "./_shared/auth.js";
 import { getServiceHeaders } from "./_shared/admin.js";
 
+const POST_HTML_FALLBACK = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <title>Post | Gimerr</title>
+  <!-- gimerr-og-meta -->
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Gimerr">
+        <img class="brand-logo" src="/assets/logo.png" alt="Gimerr">
+      </a>
+
+      <div class="search-box">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M10.8 18.1a7.3 7.3 0 1 1 5.1-2.1l4 4-1.4 1.4-4-4a7.3 7.3 0 0 1-3.7 1Zm0-2a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6Z"/>
+        </svg>
+        <input id="post-search" type="search" placeholder="Buscar jogos e usuários" aria-label="Buscar jogos e usuários">
+      </div>
+
+      <nav class="top-actions" aria-label="Ações principais">
+        <a class="text-button" href="/index.html">Feed</a>
+        <a class="auth-button" href="/sign-in.html" hidden>Entrar</a>
+        <div class="account-menu" data-account-menu hidden></div>
+      </nav>
+    </header>
+
+    <main class="post-detail-layout is-loading" id="post-detail-layout">
+      <section class="post-detail-card" id="post-detail-card" aria-live="polite">
+        <article class="post-card feed-skeleton" aria-label="Carregando post"></article>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="/auth-client.js" defer></script>
+  <script src="/user-search.js" defer></script>
+  <script src="/navbar.js" defer></script>
+  <script src="/video-player.js" defer></script>
+  <script src="/media-lightbox.js" defer></script>
+  <script src="/post.js" defer></script>
+</body>
+</html>`;
+
 function cleanText(value, maxLength = 280) {
   return String(value || "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
+}
+
+function cleanUuid(value) {
+  const text = cleanText(value, 120);
+  return text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || "";
 }
 
 function escapeHtml(value) {
@@ -61,7 +115,10 @@ function getPostTitle(row) {
 }
 
 function getMetaTags({ row, requestUrl }) {
-  const canonicalUrl = requestUrl.toString();
+  const canonical = new URL(requestUrl.toString());
+  canonical.search = "";
+  canonical.searchParams.set("id", row.id);
+  const canonicalUrl = canonical.toString();
   const origin = requestUrl.origin;
   const title = getPostTitle(row);
   const description = getPostDescription(row);
@@ -96,11 +153,13 @@ async function getPostHtml(request, env) {
   const assetUrl = new URL("/post.html", request.url);
   if (env.ASSETS?.fetch) {
     const response = await env.ASSETS.fetch(new Request(assetUrl, request));
-    return response.text();
+    const html = await response.text();
+    return html.trim() ? html : POST_HTML_FALLBACK;
   }
 
   const response = await fetch(assetUrl.toString());
-  return response.text();
+  const html = await response.text();
+  return html.trim() ? html : POST_HTML_FALLBACK;
 }
 
 async function getPostRow(env, postId) {
@@ -119,7 +178,7 @@ async function getPostRow(env, postId) {
 
 export async function onRequestGet({ request, env }) {
   const requestUrl = new URL(request.url);
-  const postId = cleanText(requestUrl.searchParams.get("id") || requestUrl.searchParams.get("post"), 80);
+  const postId = cleanUuid(requestUrl.searchParams.get("id") || requestUrl.searchParams.get("post"));
   const html = await getPostHtml(request, env);
 
   if (!postId) {

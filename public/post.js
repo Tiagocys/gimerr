@@ -34,7 +34,8 @@
 
   function getPostId() {
     const params = new URLSearchParams(window.location.search);
-    return (params.get("id") || params.get("post") || "").trim();
+    const rawId = (params.get("id") || params.get("post") || "").trim();
+    return rawId.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || "";
   }
 
   function getProfileUrl(profile) {

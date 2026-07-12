@@ -6,6 +6,23 @@ function cleanUrl(value) {
   return text;
 }
 
+function normalizeVastTag(value) {
+  const text = cleanUrl(value);
+  if (!text) return "";
+
+  try {
+    const url = new URL(text);
+    const legacyZoneId = url.searchParams.get("idz");
+    if (legacyZoneId && !url.searchParams.has("idzone")) {
+      url.searchParams.set("idzone", legacyZoneId);
+      url.searchParams.delete("idz");
+    }
+    return url.toString();
+  } catch {
+    return text;
+  }
+}
+
 function isDisabled(value) {
   return ["0", "false", "off", "disabled"].includes(String(value || "").trim().toLowerCase());
 }
@@ -27,7 +44,7 @@ function isLocalHost(host) {
 }
 
 export async function onRequestGet({ request, env }) {
-  const vastTag = cleanUrl(
+  const vastTag = normalizeVastTag(
     env.EXOCLICK_VAST_TAG_URL
       || env.EXOCLICK_VAST_TAG
       || env.exoclick_vast_tag

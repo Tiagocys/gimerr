@@ -101,6 +101,22 @@
       : {};
   }
 
+  function getVastTagForRequest(vastTag) {
+    if (!vastTag) return "";
+    try {
+      const url = new URL(vastTag, window.location.origin);
+      const legacyZoneId = url.searchParams.get("idz");
+      if (legacyZoneId && !url.searchParams.has("idzone")) {
+        url.searchParams.set("idzone", legacyZoneId);
+        url.searchParams.delete("idz");
+      }
+      url.searchParams.set("cb", `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      return url.toString();
+    } catch {
+      return vastTag;
+    }
+  }
+
   async function recordVideoView(target) {
     const postId = target?.dataset?.videoPostId || target?.closest?.("[data-video-post-id]")?.dataset?.videoPostId || "";
     if (!postId || target.dataset.videoViewRecorded === "true") return;
@@ -158,7 +174,8 @@
       options.vastOptions = {
         adList: [{
           roll: config.roll || "preRoll",
-          vastTag: config.vastTag,
+          vastTag: getVastTagForRequest(config.vastTag),
+          timer: 5,
         }],
         vastAdvanced: {
           noVastVideoCallback: restoreMainSource,

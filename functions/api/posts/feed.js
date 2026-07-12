@@ -9,6 +9,7 @@ function toPublicPost(row) {
     body: row.body,
     mediaUrl: row.media_url,
     mediaType: row.media_type,
+    mediaItems: Array.isArray(row.media_items) ? row.media_items : [],
     videoStatus: row.video_status,
     originalMediaUrl: row.original_media_url,
     readyMediaUrl: row.ready_media_url,

@@ -28,6 +28,7 @@ function collectMediaKeys(post) {
     post.original_media_key,
     post.ready_media_key,
     post.video_thumbnail_key,
+    ...(Array.isArray(post.media_items) ? post.media_items.map((item) => item?.key) : []),
   ]
     .map((key) => cleanText(key, 500))
     .filter(Boolean)
@@ -36,7 +37,7 @@ function collectMediaKeys(post) {
 
 async function fetchPost(env, postId) {
   const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
-  url.searchParams.set("select", "id,profile_id,status,media_key,original_media_key,ready_media_key,video_thumbnail_key");
+  url.searchParams.set("select", "id,profile_id,status,media_key,original_media_key,ready_media_key,video_thumbnail_key,media_items");
   url.searchParams.set("id", `eq.${postId}`);
   url.searchParams.set("limit", "1");
 

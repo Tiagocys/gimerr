@@ -5,6 +5,7 @@ import { requireVerifiedProfile } from "../../_shared/verification.js";
 const VALID_TYPES = new Set(["post", "video", "listing"]);
 const VALID_MEDIA_PREFIXES = ["posts/", "videos/", "market/"];
 const VIDEO_MEDIA_PREFIXES = ["videos/originals/", "videos/ready/", "videos/"];
+const MAX_LISTING_MEDIA_ITEMS = 5;
 
 function cleanText(value, maxLength) {
   return String(value || "")
@@ -48,6 +49,27 @@ function isValidMediaKeyForType(type, key) {
   if (!key) return true;
   return VALID_MEDIA_PREFIXES.some((prefix) => key.startsWith(prefix))
     && key.startsWith(getFolderForType(type));
+}
+
+function normalizeMediaItems(items, postType) {
+  if (!Array.isArray(items)) return [];
+  const normalized = [];
+  const seen = new Set();
+
+  for (const item of items) {
+    const url = cleanText(item?.url, 500);
+    const key = cleanText(item?.key, 500);
+    const mediaType = cleanText(item?.mediaType, 120);
+    if (!url || !key || seen.has(key)) continue;
+    if (!isValidMediaKeyForType(postType, key)) continue;
+    if (postType === "listing" && !mediaType.startsWith("image/")) continue;
+    if (postType !== "listing" && normalized.length) continue;
+    seen.add(key);
+    normalized.push({ url, key, mediaType });
+    if (postType === "listing" && normalized.length >= MAX_LISTING_MEDIA_ITEMS) break;
+  }
+
+  return normalized;
 }
 
 async function userFollowsGame(env, userId, gameId) {
@@ -147,7 +169,7 @@ async function createMentionNotifications(env, { post, author, body }) {
 }
 
 export async function onRequestPost({ request, env }) {
-  let mediaKey = "";
+  let mediaKeys = [];
   try {
     const auth = await requireAuthUser(request, env);
     if (auth.error) return auth.error;
@@ -158,10 +180,25 @@ export async function onRequestPost({ request, env }) {
     const payload = await request.json().catch(() => ({}));
     const gameId = Number(payload.gameId);
     const body = cleanText(payload.body, 220);
-    const mediaUrl = cleanText(payload.mediaUrl, 500) || null;
-    mediaKey = cleanText(payload.mediaKey, 500);
-    const mediaType = cleanText(payload.mediaType, 120) || null;
-    const postType = inferPostType(payload.type, mediaKey, mediaType);
+    const fallbackMediaUrl = cleanText(payload.mediaUrl, 500) || null;
+    const fallbackMediaKey = cleanText(payload.mediaKey, 500);
+    const fallbackMediaType = cleanText(payload.mediaType, 120) || null;
+    const postType = inferPostType(payload.type, fallbackMediaKey, fallbackMediaType);
+    if (postType === "listing" && Array.isArray(payload.mediaItems) && payload.mediaItems.length > MAX_LISTING_MEDIA_ITEMS) {
+      return jsonResponse({ error: "Anúncios aceitam até 5 imagens." }, { status: 400 });
+    }
+
+    let mediaItems = normalizeMediaItems(payload.mediaItems, postType);
+    const primaryMedia = mediaItems[0] || (fallbackMediaUrl && fallbackMediaKey
+      ? { url: fallbackMediaUrl, key: fallbackMediaKey, mediaType: fallbackMediaType }
+      : null);
+    const mediaUrl = primaryMedia?.url || fallbackMediaUrl;
+    const mediaKey = primaryMedia?.key || fallbackMediaKey;
+    const mediaType = primaryMedia?.mediaType || fallbackMediaType;
+    if (postType === "listing" && !mediaItems.length && primaryMedia?.mediaType?.startsWith("image/")) {
+      mediaItems = [primaryMedia];
+    }
+    mediaKeys = mediaItems.length ? mediaItems.map((item) => item.key) : [mediaKey].filter(Boolean);
 
     if (!gameId) {
       return jsonResponse({ error: "Selecione um game." }, { status: 400 });
@@ -188,6 +225,7 @@ export async function onRequestPost({ request, env }) {
       media_url: mediaUrl,
       media_key: mediaKey || null,
       media_type: mediaType,
+      media_items: postType === "listing" ? mediaItems : [],
       video_status: postType === "video" ? "uploaded" : "none",
       original_media_url: postType === "video" ? mediaUrl : null,
       original_media_key: postType === "video" ? mediaKey || null : null,
@@ -202,9 +240,7 @@ export async function onRequestPost({ request, env }) {
 
     return jsonResponse({ post });
   } catch (error) {
-    if (mediaKey) {
-      await deleteR2Object(env, mediaKey).catch(() => {});
-    }
+    await Promise.allSettled([...new Set(mediaKeys)].map((key) => deleteR2Object(env, key)));
     console.error("post create failed", error);
     return jsonResponse({ error: error?.message || "Falha ao publicar." }, { status: 500 });
   }

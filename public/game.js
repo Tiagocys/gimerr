@@ -49,6 +49,7 @@
     composerFileName: document.querySelector("#game-composer-file-name"),
     composerClearFile: document.querySelector("#game-composer-clear-file"),
     composerListing: document.querySelector("#game-composer-listing"),
+    composerListingHelper: document.querySelector("#game-composer-listing-helper"),
     publishPost: document.querySelector("#game-publish-post"),
     composerFeedback: document.querySelector("#game-composer-feedback"),
   };
@@ -179,12 +180,24 @@
     return Boolean(file?.type?.startsWith("image/"));
   }
 
-  function validateComposerFile(file, type) {
-    if (!file) return true;
-    if (type === "listing" && !isImageFile(file)) {
-      window.alert("Anúncios aceitam imagem JPG, PNG, WebP ou GIF.");
+  function validateComposerFiles(files, type) {
+    if (!files.length) return true;
+    if (type === "listing") {
+      if (files.length > 5) {
+        window.alert("Anúncios aceitam até 5 imagens.");
+        return false;
+      }
+      if (files.some((file) => !isImageFile(file))) {
+        window.alert("Anúncios aceitam apenas imagens JPG, PNG, WebP ou GIF.");
+        return false;
+      }
+      return true;
+    }
+    if (files.length > 1) {
+      window.alert("Posts comuns aceitam apenas um arquivo.");
       return false;
     }
+    const [file] = files;
     if (isVideoFile(file)) {
       if (isMobileVideoUploadDevice()) {
         window.alert("O upload de vídeos pode ser feito apenas através de um PC/Mac.");
@@ -199,8 +212,9 @@
     return true;
   }
 
-  function getPostTypeFromComposer(file) {
+  function getPostTypeFromComposer(files) {
     if (els.composerListing?.checked) return "listing";
+    const [file] = files;
     if (isVideoFile(file)) return "video";
     return "post";
   }
@@ -462,6 +476,63 @@
       </div>
       ${renderInlineCommentsPanel(post)}
       ${renderInlineCommentForm(post)}
+    `;
+  }
+
+  function getPostMediaItems(post) {
+    const items = Array.isArray(post.mediaItems) ? post.mediaItems : [];
+    if (items.length) return items.filter((item) => item?.url);
+    const mediaUrl = post.mediaUrl || post.image;
+    return mediaUrl
+      ? [{ url: mediaUrl, mediaType: post.mediaType }]
+      : [];
+  }
+
+  function renderImageLightboxAttrs(post, alt) {
+    const author = post.author || {};
+    return [
+      "data-image-lightbox",
+      `data-image-alt="${escapeHtml(alt)}"`,
+      `data-image-author-name="${escapeHtml(author.displayName || author.username || "Usuário Gimerr")}"`,
+      `data-image-author-username="${escapeHtml(author.username || "")}"`,
+      `data-image-author-avatar="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}"`,
+      `data-image-body="${escapeHtml(post.body || post.text || "")}"`,
+      `data-image-post-id="${escapeHtml(post.id || "")}"`,
+    ].join(" ");
+  }
+
+  function renderVideoPoster(post, item) {
+    const poster = post.videoThumbnailUrl || "";
+    return `
+      <button class="video-lazy-button media-frame" type="button" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
+        ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
+        <span class="video-lazy-play" aria-hidden="true"></span>
+      </button>
+    `;
+  }
+
+  function renderPostMedia(post) {
+    const items = getPostMediaItems(post);
+    if (!items.length) return "";
+    const [firstItem] = items;
+    if (firstItem.mediaType?.startsWith("video/")) {
+      return renderVideoPoster(post, firstItem);
+    }
+    if (items.length === 1) {
+      return `
+        <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(firstItem.url)}" ${renderImageLightboxAttrs(post, "Imagem do post")}>
+          <img class="media-frame" src="${escapeHtml(firstItem.url)}" alt="">
+        </button>
+      `;
+    }
+    return `
+      <div class="post-media-gallery is-count-${Math.min(items.length, 5)}">
+        ${items.slice(0, 5).map((item) => `
+          <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(item.url)}" ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
+            <img src="${escapeHtml(item.url)}" alt="">
+          </button>
+        `).join("")}
+      </div>
     `;
   }
 
@@ -737,7 +808,23 @@
     return payload;
   }
 
-  async function createGamePost({ type, text, uploadedMedia }) {
+  async function uploadComposerMediaItems(files, target) {
+    if (!files.length) return [];
+    const uploadedItems = [];
+    for (let index = 0; index < files.length; index += 1) {
+      setPublishing(true, files.length > 1 ? `Enviando ${index + 1}/${files.length}...` : "Enviando...");
+      const uploaded = await uploadComposerMedia(files[index], target);
+      uploadedItems.push({
+        url: uploaded.url,
+        key: uploaded.key,
+        mediaType: uploaded.mediaType,
+      });
+    }
+    return uploadedItems;
+  }
+
+  async function createGamePost({ type, text, uploadedMediaItems }) {
+    const primaryMedia = uploadedMediaItems[0] || null;
     const response = await fetch("/api/posts/create", {
       method: "POST",
       headers: {
@@ -749,9 +836,10 @@
         gameId: state.game.igdbId,
         type,
         body: text,
-        mediaUrl: uploadedMedia?.url || null,
-        mediaKey: uploadedMedia?.key || null,
-        mediaType: uploadedMedia?.mediaType || null,
+        mediaUrl: primaryMedia?.url || null,
+        mediaKey: primaryMedia?.key || null,
+        mediaType: primaryMedia?.mediaType || null,
+        mediaItems: type === "listing" ? uploadedMediaItems : [],
       }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -772,13 +860,31 @@
   }
 
   function renderComposerFile() {
-    const [file] = els.composerFile?.files || [];
-    if (!file) {
+    const files = Array.from(els.composerFile?.files || []);
+    if (!files.length) {
       clearComposerFile();
       return;
     }
     if (els.composerMedia) els.composerMedia.hidden = false;
-    if (els.composerFileName) els.composerFileName.textContent = file.name;
+    if (els.composerFileName) {
+      els.composerFileName.textContent = files.length === 1
+        ? files[0].name
+        : `${files.length} imagens selecionadas`;
+    }
+  }
+
+  function syncComposerListingState() {
+    const isListing = Boolean(els.composerListing?.checked);
+    if (els.composerListingHelper) els.composerListingHelper.hidden = !isListing;
+    if (els.composerFile) {
+      els.composerFile.multiple = isListing;
+      els.composerFile.accept = isListing
+        ? "image/jpeg,image/png,image/webp,image/gif"
+        : "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
+      if (!isListing && els.composerFile.files.length > 1) {
+        clearComposerFile();
+      }
+    }
   }
 
   async function publishGamePost() {
@@ -789,25 +895,26 @@
     if (!state.game) return;
 
     const text = els.composerText?.value?.trim() || "";
-    const [file] = els.composerFile?.files || [];
-    if (!text && !file) {
+    const files = Array.from(els.composerFile?.files || []);
+    if (!text && !files.length) {
       els.composerText?.focus();
       return;
     }
 
-    const type = getPostTypeFromComposer(file);
-    if (!validateComposerFile(file, type)) return;
+    const type = getPostTypeFromComposer(files);
+    if (!validateComposerFiles(files, type)) return;
 
     try {
       setComposerFeedback("");
-      setPublishing(true, file ? "Enviando..." : "Publicando...");
-      const uploadTarget = file ? type : "post";
-      const uploadedMedia = await uploadComposerMedia(file, uploadTarget);
+      setPublishing(true, files.length ? "Enviando..." : "Publicando...");
+      const uploadTarget = files.length ? type : "post";
+      const uploadedMediaItems = await uploadComposerMediaItems(files, uploadTarget);
       setPublishing(true, "Publicando...");
-      await createGamePost({ type, text, uploadedMedia });
+      await createGamePost({ type, text, uploadedMediaItems });
       if (els.composerText) els.composerText.value = "";
       if (els.composerListing) els.composerListing.checked = false;
       clearComposerFile();
+      syncComposerListingState();
       await loadGame();
       setComposerFeedback("Publicado.", "success");
     } catch (error) {
@@ -992,12 +1099,7 @@
       const author = post.author || {};
       const authorName = author.displayName || post.author || "Usuário Gimerr";
       const authorHandle = author.username ? `@${author.username}` : "";
-      const mediaUrl = post.mediaUrl || post.image;
-      const media = mediaUrl
-        ? post.mediaType?.startsWith("video/")
-          ? `<video class="media-frame" data-fluid-video src="${escapeHtml(mediaUrl)}" ${post.videoThumbnailUrl ? `poster="${escapeHtml(post.videoThumbnailUrl)}"` : ""} controls playsinline preload="metadata"><source src="${escapeHtml(mediaUrl)}" type="${escapeHtml(post.mediaType || "video/mp4")}"></video>`
-          : `<img class="media-frame" src="${escapeHtml(mediaUrl)}" alt="">`
-        : "";
+      const media = renderPostMedia(post);
       return `
       <article class="post-card">
         ${media}
@@ -1150,13 +1252,8 @@
   els.publishPost?.addEventListener("click", publishGamePost);
   els.composerFile?.addEventListener("change", renderComposerFile);
   els.composerClearFile?.addEventListener("click", clearComposerFile);
-  els.composerListing?.addEventListener("change", () => {
-    if (els.composerFile) {
-      els.composerFile.accept = els.composerListing.checked
-        ? "image/jpeg,image/png,image/webp,image/gif"
-        : "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
-    }
-  });
+  els.composerListing?.addEventListener("change", syncComposerListingState);
+  syncComposerListingState();
   els.filterButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.filter = button.dataset.gameFeedFilter;

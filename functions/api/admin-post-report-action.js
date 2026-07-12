@@ -59,6 +59,7 @@ function collectPostMediaKeys(post) {
     post?.original_media_key,
     post?.ready_media_key,
     post?.video_thumbnail_key,
+    ...(Array.isArray(post?.media_items) ? post.media_items.map((item) => item?.key) : []),
   ].filter((key) => {
     if (!key) return false;
     return key.startsWith("posts/")
@@ -105,7 +106,7 @@ export async function onRequestPost({ request, env }) {
     if (report.status !== "pending") return jsonResponse({ error: "Esta denúncia já foi analisada." }, { status: 409 });
 
     const [post] = report.post_id
-      ? await fetchRows(env, "feed_posts", "id,profile_id,media_key,original_media_key,ready_media_key,video_thumbnail_key", { id: `eq.${report.post_id}`, limit: "1" })
+      ? await fetchRows(env, "feed_posts", "id,profile_id,media_key,original_media_key,ready_media_key,video_thumbnail_key,media_items", { id: `eq.${report.post_id}`, limit: "1" })
       : [];
     const targetUserId = post?.profile_id || report.reported_profile_id;
     const [targetUser] = targetUserId

@@ -3,7 +3,6 @@
   let configPromise = null;
   let scriptPromise = null;
   let videoCounter = 0;
-  let observer = null;
 
   function getConfig() {
     if (!configPromise) {
@@ -75,7 +74,6 @@
       }
       source.src = mainSource;
       source.type = mainType;
-      video.src = mainSource;
     };
     const options = {
       layoutControls: {
@@ -130,8 +128,12 @@
         video.dataset.fluidFallbackRestored = "true";
         const source = video.querySelector("source")?.getAttribute("src") || video.getAttribute("src") || video.currentSrc;
         if (!source) return;
-        video.src = source;
-        video.load();
+        if (!video.querySelector("source")) {
+          const nextSource = document.createElement("source");
+          nextSource.src = source;
+          nextSource.type = video.dataset.mediaType || "video/mp4";
+          video.appendChild(nextSource);
+        }
       });
       video.dataset.fluidState = "ready";
       video.gimerrFluidPlayer = player;
@@ -142,39 +144,18 @@
     }
   }
 
-  function getObserver() {
-    if (!("IntersectionObserver" in window)) return null;
-    if (observer) return observer;
-    observer = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        observer.unobserve(entry.target);
-        initializeVideo(entry.target);
-      });
-    }, {
-      rootMargin: "360px 0px",
-      threshold: 0.01,
-    });
-    return observer;
-  }
-
   function bindLazyInitialization(video) {
     if (!video || video.dataset.fluidBound) return;
     video.dataset.fluidBound = "true";
     video.addEventListener("pointerdown", () => initializeVideo(video), { once: true });
     video.addEventListener("focus", () => initializeVideo(video), { once: true });
-    const lazyObserver = getObserver();
-    if (lazyObserver) {
-      lazyObserver.observe(video);
-    } else {
-      window.setTimeout(() => initializeVideo(video), 0);
-    }
   }
 
   function prepare(root = document) {
     const scope = root instanceof Element || root instanceof Document ? root : document;
     const videos = [...scope.querySelectorAll("video[data-fluid-video]")];
     videos.forEach(bindLazyInitialization);
+    if (!videos.length) return;
     getConfig().then((config) => {
       if (config?.enabled) {
         loadFluidPlayer().catch((error) => {
@@ -184,15 +165,52 @@
     });
   }
 
+  async function loadVideoFromPoster(button) {
+    if (!button || button.dataset.loadingVideo === "true") return;
+    const src = button.dataset.videoSrc || "";
+    if (!src) return;
+    button.dataset.loadingVideo = "true";
+    button.setAttribute("aria-busy", "true");
+
+    const video = document.createElement("video");
+    video.className = "media-frame";
+    video.dataset.fluidVideo = "true";
+    video.dataset.mediaType = button.dataset.videoType || "video/mp4";
+    video.controls = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    if (button.dataset.videoPoster) video.poster = button.dataset.videoPoster;
+
+    const source = document.createElement("source");
+    source.src = src;
+    source.type = button.dataset.videoType || "video/mp4";
+    video.appendChild(source);
+
+    button.replaceWith(video);
+    await initializeVideo(video);
+    video.play().catch(() => {});
+  }
+
   window.GimerrVideoPlayer = {
     prepare,
     initializeVideo,
+    loadVideoFromPoster,
   };
 
   document.addEventListener("pointerdown", (event) => {
+    const posterButton = event.target instanceof Element ? event.target.closest("[data-video-src]") : null;
+    if (posterButton) {
+      loadVideoFromPoster(posterButton);
+      return;
+    }
     const video = event.target instanceof Element ? event.target.closest("video[data-fluid-video]") : null;
     if (video) initializeVideo(video);
   }, { capture: true });
+
+  document.addEventListener("click", (event) => {
+    const posterButton = event.target instanceof Element ? event.target.closest("[data-video-src]") : null;
+    if (posterButton) loadVideoFromPoster(posterButton);
+  });
 
   document.addEventListener("focusin", (event) => {
     const video = event.target instanceof Element ? event.target.closest("video[data-fluid-video]") : null;

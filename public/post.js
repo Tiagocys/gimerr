@@ -77,6 +77,62 @@
     return `<p class="post-mention-line"><strong>${escapeHtml(authorName)}</strong> está com ${links}</p>`;
   }
 
+  function getPostMediaItems(post) {
+    const items = Array.isArray(post.mediaItems) ? post.mediaItems : [];
+    if (items.length) return items.filter((item) => item?.url);
+    return post.mediaUrl
+      ? [{ url: post.mediaUrl, mediaType: post.mediaType }]
+      : [];
+  }
+
+  function renderImageLightboxAttrs(post, alt) {
+    const author = post.author || {};
+    return [
+      "data-image-lightbox",
+      `data-image-alt="${escapeHtml(alt)}"`,
+      `data-image-author-name="${escapeHtml(author.displayName || author.username || "Usuário Gimerr")}"`,
+      `data-image-author-username="${escapeHtml(author.username || "")}"`,
+      `data-image-author-avatar="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}"`,
+      `data-image-body="${escapeHtml(post.body || "")}"`,
+      `data-image-post-id="${escapeHtml(post.id || "")}"`,
+    ].join(" ");
+  }
+
+  function renderVideoPoster(post, item) {
+    const poster = post.videoThumbnailUrl || "";
+    return `
+      <button class="video-lazy-button media-frame" type="button" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
+        ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
+        <span class="video-lazy-play" aria-hidden="true"></span>
+      </button>
+    `;
+  }
+
+  function renderPostMedia(post) {
+    const items = getPostMediaItems(post);
+    if (!items.length) return "";
+    const [firstItem] = items;
+    if (firstItem.mediaType?.startsWith("video/")) {
+      return renderVideoPoster(post, firstItem);
+    }
+    if (items.length === 1) {
+      return `
+        <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(firstItem.url)}" ${renderImageLightboxAttrs(post, "Imagem do post")}>
+          <img class="media-frame" src="${escapeHtml(firstItem.url)}" alt="">
+        </button>
+      `;
+    }
+    return `
+      <div class="post-media-gallery is-count-${Math.min(items.length, 5)}">
+        ${items.slice(0, 5).map((item) => `
+          <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(item.url)}" ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
+            <img src="${escapeHtml(item.url)}" alt="">
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
   function renderTextWithMentions(text, authorUsername = "") {
     const value = String(text || "");
     const author = String(authorUsername || "").toLowerCase();
@@ -358,11 +414,7 @@
     const author = post.author || {};
     const authorName = author.displayName || "Usuário Gimerr";
     const authorHandle = author.username ? `@${author.username}` : "@gimerr";
-    const media = post.mediaUrl
-      ? post.mediaType?.startsWith("video/")
-        ? `<video class="media-frame" data-fluid-video src="${escapeHtml(post.mediaUrl)}" ${post.videoThumbnailUrl ? `poster="${escapeHtml(post.videoThumbnailUrl)}"` : ""} controls playsinline preload="metadata"><source src="${escapeHtml(post.mediaUrl)}" type="${escapeHtml(post.mediaType || "video/mp4")}"></video>`
-        : `<img class="media-frame" src="${escapeHtml(post.mediaUrl)}" alt="">`
-      : "";
+    const media = renderPostMedia(post);
 
     document.title = `${authorName} | Gimerr`;
     els.layout.classList.remove("is-loading");

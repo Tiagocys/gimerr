@@ -10,7 +10,23 @@ function isDisabled(value) {
   return ["0", "false", "off", "disabled"].includes(String(value || "").trim().toLowerCase());
 }
 
-export async function onRequestGet({ env }) {
+function isEnabled(value) {
+  return ["1", "true", "on", "enabled"].includes(String(value || "").trim().toLowerCase());
+}
+
+function getRequestHost(request) {
+  try {
+    return new URL(request.url).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isLocalHost(host) {
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
+export async function onRequestGet({ request, env }) {
   const vastTag = cleanUrl(
     env.EXOCLICK_VAST_TAG_URL
       || env.EXOCLICK_VAST_TAG
@@ -19,12 +35,21 @@ export async function onRequestGet({ env }) {
       || env.VIDEO_ADS_VAST_TAG_URL
       || env.VIDEO_ADS_VAST_URL,
   );
-  const enabled = Boolean(vastTag) && !isDisabled(env.VIDEO_ADS_ENABLED);
+  const host = getRequestHost(request);
+  const localAdsEnabled = isEnabled(env.VIDEO_ADS_ALLOW_LOCAL);
+  const enabled = Boolean(vastTag)
+    && !isDisabled(env.VIDEO_ADS_ENABLED)
+    && (!isLocalHost(host) || localAdsEnabled);
 
   return jsonResponse({
     enabled,
     provider: enabled ? "exoclick" : "",
     roll: "preRoll",
     vastTag: enabled ? vastTag : "",
+    reason: !vastTag
+      ? "missing_vast_tag"
+      : isLocalHost(host) && !localAdsEnabled
+        ? "disabled_on_localhost"
+        : "",
   });
 }

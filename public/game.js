@@ -785,6 +785,45 @@
 
   async function uploadComposerMedia(file, target) {
     if (!file) return null;
+    if (target === "video") {
+      const signedResponse = await fetch("/api/post-media-upload-url", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${state.session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          target,
+          fileName: file.name,
+          mediaType: file.type,
+          size: file.size,
+        }),
+      });
+      const signedPayload = await signedResponse.json().catch(() => ({}));
+      if (!signedResponse.ok) {
+        const error = new Error(signedPayload.error || "Não foi possível preparar o envio do vídeo.");
+        error.code = signedPayload.code;
+        error.discordLinked = signedPayload.discordLinked;
+        error.verificationStatus = signedPayload.verificationStatus;
+        throw error;
+      }
+
+      const uploadResponse = await fetch(signedPayload.uploadUrl, {
+        method: "PUT",
+        headers: signedPayload.headers || { "content-type": file.type || "application/octet-stream" },
+        body: file,
+      });
+      if (!uploadResponse.ok) {
+        throw new Error(`Falha ao enviar vídeo para o storage (${uploadResponse.status}).`);
+      }
+
+      return {
+        key: signedPayload.key,
+        url: signedPayload.url,
+        mediaType: signedPayload.mediaType,
+      };
+    }
 
     const formData = new FormData();
     formData.append("target", target);

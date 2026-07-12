@@ -1,0 +1,25 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": [
+          "https://gimerr.com",
+          "https://gimerr.pages.dev",
+          "http://localhost:8788"
+        ],
+        "methods": [
+          "GET",
+          "HEAD",
+          "PUT"
+        ],
+        "headers": [
+          "content-type"
+        ]
+      },
+      "exposeHeaders": [
+        "etag"
+      ],
+      "maxAgeSeconds": 3600
+    }
+  ]
+}

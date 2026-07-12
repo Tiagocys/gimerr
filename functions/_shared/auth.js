@@ -149,6 +149,61 @@ function getR2S3ObjectUrl(env, key) {
   return endpoint.toString();
 }
 
+function encodeQueryValue(value) {
+  return encodeURIComponent(String(value))
+    .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+export async function createR2PresignedPutUrl(env, key, options = {}) {
+  const config = getR2S3Config(env);
+  if (!config) return null;
+
+  const objectUrl = getR2S3ObjectUrl(env, key);
+  if (!objectUrl) return null;
+
+  const url = new URL(objectUrl);
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+  const dateStamp = amzDate.slice(0, 8);
+  const expiresSeconds = Math.max(60, Math.min(Number(options.expiresSeconds || 900), 3600));
+  const scope = `${dateStamp}/auto/s3/aws4_request`;
+  const signedHeaders = "host";
+  const params = {
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Credential": `${config.accessKeyId}/${scope}`,
+    "X-Amz-Date": amzDate,
+    "X-Amz-Expires": String(expiresSeconds),
+    "X-Amz-SignedHeaders": signedHeaders,
+  };
+  const canonicalQueryString = Object.entries(params)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => `${encodeQueryValue(name)}=${encodeQueryValue(value)}`)
+    .join("&");
+  const canonicalRequest = [
+    "PUT",
+    url.pathname,
+    canonicalQueryString,
+    `host:${url.host}\n`,
+    signedHeaders,
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    scope,
+    await sha256(canonicalRequest),
+  ].join("\n");
+
+  const dateKey = await hmac(`AWS4${config.secretAccessKey}`, dateStamp);
+  const regionKey = await hmac(dateKey, "auto");
+  const serviceKey = await hmac(regionKey, "s3");
+  const signingKey = await hmac(serviceKey, "aws4_request");
+  const signature = toHex(await hmac(signingKey, stringToSign));
+
+  url.search = `${canonicalQueryString}&X-Amz-Signature=${signature}`;
+  return url.toString();
+}
+
 export async function putR2Object(env, key, body, options = {}) {
   const s3Url = getR2S3ObjectUrl(env, key);
   if (s3Url) {

@@ -16,6 +16,8 @@
     commentsLoadingPostId: "",
     commentsByPost: {},
     commentsErrorByPost: {},
+    composerPreviewUrls: [],
+    composerSelectedFiles: [],
     commentMention: {
       active: false,
       start: -1,
@@ -47,6 +49,7 @@
     composerFile: document.querySelector("#game-composer-file"),
     composerMedia: document.querySelector("#game-composer-media"),
     composerFileName: document.querySelector("#game-composer-file-name"),
+    composerMediaPreviews: document.querySelector("#game-composer-media-previews"),
     composerClearFile: document.querySelector("#game-composer-clear-file"),
     composerListing: document.querySelector("#game-composer-listing"),
     composerListingHelper: document.querySelector("#game-composer-listing-helper"),
@@ -501,6 +504,17 @@
     ].join(" ");
   }
 
+  function renderImageGalleryAttrs(items) {
+    const payload = items
+      .filter((item) => item?.url)
+      .slice(0, 5)
+      .map((item, index) => ({
+        url: item.url,
+        alt: `Imagem ${index + 1} do anúncio`,
+      }));
+    return `data-image-items="${escapeHtml(JSON.stringify(payload))}"`;
+  }
+
   function renderVideoPoster(post, item) {
     const poster = post.videoThumbnailUrl || "";
     return `
@@ -526,13 +540,10 @@
       `;
     }
     return `
-      <div class="post-media-gallery is-count-${Math.min(items.length, 5)}">
-        ${items.slice(0, 5).map((item) => `
-          <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(item.url)}" ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
-            <img src="${escapeHtml(item.url)}" alt="">
-          </button>
-        `).join("")}
-      </div>
+      <button class="media-zoom-button listing-preview-button" type="button" data-image-src="${escapeHtml(firstItem.url)}" data-image-index="0" ${renderImageGalleryAttrs(items)} ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
+        <img src="${escapeHtml(firstItem.url)}" alt="">
+        <span class="listing-preview-count">+${items.length - 1}</span>
+      </button>
     `;
   }
 
@@ -893,22 +904,72 @@
   }
 
   function clearComposerFile() {
+    revokeComposerPreviewUrls();
+    state.composerSelectedFiles = [];
     if (els.composerFile) els.composerFile.value = "";
     if (els.composerMedia) els.composerMedia.hidden = true;
     if (els.composerFileName) els.composerFileName.textContent = "";
+    if (els.composerMediaPreviews) els.composerMediaPreviews.innerHTML = "";
+  }
+
+  function revokeComposerPreviewUrls() {
+    state.composerPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+    state.composerPreviewUrls = [];
+  }
+
+  function getFileSignature(file) {
+    return [file.name, file.size, file.lastModified, file.type].join(":");
+  }
+
+  function getComposerFiles() {
+    return state.composerSelectedFiles;
+  }
+
+  function addComposerSelectedFiles(files) {
+    if (!els.composerListing?.checked) {
+      state.composerSelectedFiles = files.slice(0, 1);
+      return;
+    }
+    const bySignature = new Map(state.composerSelectedFiles.map((file) => [getFileSignature(file), file]));
+    files.forEach((file) => {
+      if (bySignature.size >= 5) return;
+      bySignature.set(getFileSignature(file), file);
+    });
+    state.composerSelectedFiles = Array.from(bySignature.values()).slice(0, 5);
   }
 
   function renderComposerFile() {
-    const files = Array.from(els.composerFile?.files || []);
+    const selectedFiles = Array.from(els.composerFile?.files || []);
+    if (selectedFiles.length) addComposerSelectedFiles(selectedFiles);
+    if (els.composerFile) els.composerFile.value = "";
+
+    const files = getComposerFiles();
     if (!files.length) {
       clearComposerFile();
       return;
     }
+    const type = getPostTypeFromComposer(files);
+    if (!validateComposerFiles(files, type)) {
+      clearComposerFile();
+      return;
+    }
+    revokeComposerPreviewUrls();
     if (els.composerMedia) els.composerMedia.hidden = false;
     if (els.composerFileName) {
       els.composerFileName.textContent = files.length === 1
         ? files[0].name
         : `${files.length} imagens selecionadas`;
+    }
+    if (els.composerMediaPreviews) {
+      const imageFiles = files.filter(isImageFile).slice(0, 5);
+      state.composerPreviewUrls = imageFiles.map((file) => URL.createObjectURL(file));
+      els.composerMediaPreviews.innerHTML = state.composerPreviewUrls
+        .map((url, index) => `
+          <figure class="composer-media-preview">
+            <img src="${escapeHtml(url)}" alt="Imagem selecionada ${index + 1}">
+          </figure>
+        `)
+        .join("");
     }
   }
 
@@ -920,7 +981,11 @@
       els.composerFile.accept = isListing
         ? "image/jpeg,image/png,image/webp,image/gif"
         : "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
-      if (!isListing && els.composerFile.files.length > 1) {
+      const files = getComposerFiles();
+      const invalidListingSelection = isListing && (
+        files.length > 5 || files.some((file) => !isImageFile(file))
+      );
+      if ((!isListing && state.composerSelectedFiles.length) || invalidListingSelection) {
         clearComposerFile();
       }
     }
@@ -934,7 +999,7 @@
     if (!state.game) return;
 
     const text = els.composerText?.value?.trim() || "";
-    const files = Array.from(els.composerFile?.files || []);
+    const files = getComposerFiles();
     if (!text && !files.length) {
       els.composerText?.focus();
       return;

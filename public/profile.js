@@ -156,6 +156,17 @@ function renderImageLightboxAttrs(post, alt) {
   ].join(" ");
 }
 
+function renderImageGalleryAttrs(items) {
+  const payload = items
+    .filter((item) => item?.url)
+    .slice(0, 5)
+    .map((item, index) => ({
+      url: item.url,
+      alt: `Imagem ${index + 1} do anúncio`,
+    }));
+  return `data-image-items="${escapeHtml(JSON.stringify(payload))}"`;
+}
+
 function renderVideoPoster(post, item) {
   const poster = post.videoThumbnailUrl || "";
   return `
@@ -181,13 +192,10 @@ function renderPostMedia(post) {
     `;
   }
   return `
-    <div class="post-media-gallery is-count-${Math.min(items.length, 5)}">
-      ${items.slice(0, 5).map((item) => `
-        <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(item.url)}" ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
-          <img src="${escapeHtml(item.url)}" alt="">
-        </button>
-      `).join("")}
-    </div>
+    <button class="media-zoom-button listing-preview-button" type="button" data-image-src="${escapeHtml(firstItem.url)}" data-image-index="0" ${renderImageGalleryAttrs(items)} ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
+      <img src="${escapeHtml(firstItem.url)}" alt="">
+      <span class="listing-preview-count">+${items.length - 1}</span>
+    </button>
   `;
 }
 

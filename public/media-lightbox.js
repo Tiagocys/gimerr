@@ -23,6 +23,8 @@
     sessionLoading: false,
     commentSubmitting: false,
     replyingToCommentId: "",
+    mediaItems: [],
+    activeMediaIndex: 0,
   };
 
   function escapeHtml(value) {
@@ -94,7 +96,10 @@
       <button class="media-lightbox-close" type="button" aria-label="Fechar imagem">×</button>
       <section class="media-lightbox-panel" role="dialog" aria-modal="true" aria-label="Imagem ampliada">
         <div class="media-lightbox-stage">
+          <button class="media-lightbox-nav is-prev" type="button" aria-label="Imagem anterior" hidden>‹</button>
           <img class="media-lightbox-image" alt="">
+          <button class="media-lightbox-nav is-next" type="button" aria-label="Próxima imagem" hidden>›</button>
+          <span class="media-lightbox-counter" hidden></span>
         </div>
         <aside class="media-lightbox-context" aria-label="Informações do post">
           <div class="media-lightbox-author">
@@ -130,8 +135,13 @@
     state.commentsFormSlot = backdrop.querySelector(".media-lightbox-comment-form-slot");
     state.commentsMoreButton = backdrop.querySelector(".media-lightbox-comments-more");
     state.closeButton = backdrop.querySelector(".media-lightbox-close");
+    state.previousButton = backdrop.querySelector(".media-lightbox-nav.is-prev");
+    state.nextButton = backdrop.querySelector(".media-lightbox-nav.is-next");
+    state.counter = backdrop.querySelector(".media-lightbox-counter");
 
     state.closeButton?.addEventListener("click", closeLightbox);
+    state.previousButton?.addEventListener("click", () => showMediaAt(state.activeMediaIndex - 1));
+    state.nextButton?.addEventListener("click", () => showMediaAt(state.activeMediaIndex + 1));
     state.commentsMoreButton?.addEventListener("click", () => {
       loadComments(state.activePostId, state.requestId, { append: true });
     });
@@ -409,13 +419,41 @@
     renderCommentsArea();
   }
 
+  function normalizeMediaItems(src, alt, items = []) {
+    const normalized = (Array.isArray(items) ? items : [])
+      .map((item) => ({
+        url: item?.url || item?.src || "",
+        alt: item?.alt || alt || "",
+      }))
+      .filter((item) => item.url);
+    if (normalized.length) return normalized;
+    return src ? [{ url: src, alt: alt || "" }] : [];
+  }
+
+  function showMediaAt(index) {
+    if (!state.mediaItems.length || !state.image) return;
+    const total = state.mediaItems.length;
+    state.activeMediaIndex = (index + total) % total;
+    const item = state.mediaItems[state.activeMediaIndex] || state.mediaItems[0];
+    state.image.src = item.url;
+    state.image.alt = item.alt || "";
+    const hasMultiple = total > 1;
+    if (state.previousButton) state.previousButton.hidden = !hasMultiple;
+    if (state.nextButton) state.nextButton.hidden = !hasMultiple;
+    if (state.counter) {
+      state.counter.hidden = !hasMultiple;
+      state.counter.textContent = hasMultiple ? `${state.activeMediaIndex + 1}/${total}` : "";
+    }
+  }
+
   function openLightbox(src, alt = "", meta = {}) {
     if (!src) return;
     ensureLightbox();
     state.requestId += 1;
     const requestId = state.requestId;
-    state.image.src = src;
-    state.image.alt = alt;
+    state.mediaItems = normalizeMediaItems(src, alt, meta.items);
+    state.activeMediaIndex = Math.min(Math.max(Number(meta.index || 0), 0), Math.max(state.mediaItems.length - 1, 0));
+    showMediaAt(state.activeMediaIndex);
     state.avatar.src = meta.authorAvatar || "./assets/avatar.svg";
     state.avatar.alt = meta.authorName ? `Foto de ${meta.authorName}` : "";
     state.name.textContent = meta.authorName || "Usuário Gimerr";
@@ -450,7 +488,19 @@
     state.backdrop.hidden = true;
     state.image.removeAttribute("src");
     state.avatar.removeAttribute("src");
+    state.mediaItems = [];
+    state.activeMediaIndex = 0;
     document.body.style.overflow = state.previousOverflow;
+  }
+
+  function parseMediaItems(value) {
+    if (!value) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
   }
 
   document.addEventListener("click", (event) => {
@@ -460,6 +510,8 @@
     if (!trigger) return;
     event.preventDefault();
     openLightbox(trigger.getAttribute("data-image-src"), trigger.getAttribute("data-image-alt") || "", {
+      items: parseMediaItems(trigger.getAttribute("data-image-items") || ""),
+      index: Number(trigger.getAttribute("data-image-index") || 0),
       authorName: trigger.getAttribute("data-image-author-name") || "",
       authorUsername: trigger.getAttribute("data-image-author-username") || "",
       authorAvatar: trigger.getAttribute("data-image-author-avatar") || "",
@@ -470,5 +522,8 @@
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeLightbox();
+    if (!state.backdrop || state.backdrop.hidden) return;
+    if (event.key === "ArrowLeft") showMediaAt(state.activeMediaIndex - 1);
+    if (event.key === "ArrowRight") showMediaAt(state.activeMediaIndex + 1);
   });
 }());

@@ -371,21 +371,6 @@ function isImageFile(file) {
   return Boolean(file?.type?.startsWith("image/"));
 }
 
-function formatFileSize(bytes) {
-  const value = Number(bytes || 0);
-  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
-  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(2)} MB`;
-  if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
-  return `${value} B`;
-}
-
-function logVideoStage(stage, details = {}) {
-  console.log(`[gimerr-video] ${stage}`, {
-    ts: new Date().toISOString(),
-    ...details,
-  });
-}
-
 function getComposerAccept() {
   return "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
 }
@@ -398,18 +383,10 @@ function getPostTypeFromFile(file) {
 function validateComposerFile(file) {
   if (!file) return true;
   if (isVideoFile(file)) {
-    logVideoStage("validating-file", {
-      name: file.name,
-      type: file.type,
-      size: formatFileSize(file.size),
-      userAgent: navigator.userAgent,
-    });
     if (isMobileVideoUploadDevice()) {
-      logVideoStage("validation-failed", { reason: "mobile-device" });
       window.alert("O upload de vídeos pode ser feito apenas através de um PC/Mac.");
       return false;
     }
-    logVideoStage("validation-ok");
     return true;
   }
 
@@ -750,6 +727,17 @@ function renderImageLightboxAttrs(post, alt) {
   ].join(" ");
 }
 
+function renderImageGalleryAttrs(items) {
+  const payload = items
+    .filter((item) => item?.url)
+    .slice(0, 5)
+    .map((item, index) => ({
+      url: item.url,
+      alt: `Imagem ${index + 1} do anúncio`,
+    }));
+  return `data-image-items="${escapeHtml(JSON.stringify(payload))}"`;
+}
+
 function renderVideoPoster(post, item) {
   const poster = post.videoThumbnailUrl || "";
   return `
@@ -775,13 +763,10 @@ function renderPostMedia(post) {
     `;
   }
   return `
-    <div class="post-media-gallery is-count-${Math.min(items.length, 5)}">
-      ${items.slice(0, 5).map((item) => `
-        <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(item.url)}" ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
-          <img src="${escapeHtml(item.url)}" alt="">
-        </button>
-      `).join("")}
-    </div>
+    <button class="media-zoom-button listing-preview-button" type="button" data-image-src="${escapeHtml(firstItem.url)}" data-image-index="0" ${renderImageGalleryAttrs(items)} ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
+      <img src="${escapeHtml(firstItem.url)}" alt="">
+      <span class="listing-preview-count">+${items.length - 1}</span>
+    </button>
   `;
 }
 
@@ -1409,25 +1394,12 @@ function setFilter(nextFilter) {
 async function prepareComposerUploadFile(file, type) {
   if (!file) return null;
   if (!validateComposerFile(file)) return null;
-  if (type === "video") {
-    logVideoStage("client-compression-skipped", {
-      reason: "server-worker-enabled",
-      uploadMode: "original-first",
-      size: formatFileSize(file.size),
-    });
-  }
   return file;
 }
 
 async function uploadComposerMedia(file, target) {
   if (!file) return null;
   if (target === "video") {
-    logVideoStage("upload-started", {
-      name: file.name,
-      type: file.type,
-      size: formatFileSize(file.size),
-    });
-
     const signedResponse = await fetch("/api/post-media-upload-url", {
       method: "POST",
       headers: {
@@ -1451,11 +1423,6 @@ async function uploadComposerMedia(file, target) {
       throw error;
     }
 
-    logVideoStage("direct-upload-started", {
-      key: signedPayload.key,
-      size: formatFileSize(file.size),
-    });
-
     const uploadResponse = await fetch(signedPayload.uploadUrl, {
       method: "PUT",
       headers: signedPayload.headers || { "content-type": file.type || "application/octet-stream" },
@@ -1465,11 +1432,6 @@ async function uploadComposerMedia(file, target) {
       throw new Error(`Falha ao enviar vídeo para o storage (${uploadResponse.status}).`);
     }
 
-    logVideoStage("upload-finished", {
-      key: signedPayload.key,
-      url: signedPayload.url,
-      mediaType: signedPayload.mediaType,
-    });
     return {
       key: signedPayload.key,
       url: signedPayload.url,
@@ -1496,23 +1458,10 @@ async function uploadComposerMedia(file, target) {
     error.verificationStatus = payload.verificationStatus;
     throw error;
   }
-  if (target === "video") {
-    logVideoStage("upload-finished", {
-      key: payload.key,
-      url: payload.url,
-      mediaType: payload.mediaType,
-    });
-  }
   return payload;
 }
 
 async function createFeedPost({ game, type, text, uploadedMedia }) {
-  if (type === "video") {
-    logVideoStage("post-create-started", {
-      gameId: game.id,
-      mediaKey: uploadedMedia?.key || null,
-    });
-  }
   const response = await fetch("/api/posts/create", {
     method: "POST",
     headers: {
@@ -1536,11 +1485,6 @@ async function createFeedPost({ game, type, text, uploadedMedia }) {
     error.discordLinked = payload.discordLinked;
     error.verificationStatus = payload.verificationStatus;
     throw error;
-  }
-  if (type === "video") {
-    logVideoStage("post-create-finished", {
-      postId: payload.post?.id,
-    });
   }
   return payload.post;
 }

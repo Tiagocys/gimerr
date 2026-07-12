@@ -78,7 +78,10 @@
           <section class="composer game-composer" id="game-composer" aria-label="Criar publicação no jogo">
             <textarea id="game-composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou publique um anúncio."></textarea>
             <div class="composer-media" id="game-composer-media" hidden>
-              <span id="game-composer-file-name"></span>
+              <div class="composer-media-summary">
+                <span id="game-composer-file-name"></span>
+                <div class="composer-media-previews" id="game-composer-media-previews"></div>
+              </div>
               <button class="text-button" id="game-composer-clear-file" type="button">Remover</button>
             </div>
             <div class="composer-footer">
@@ -98,7 +101,7 @@
               </div>
             </div>
             <p class="composer-listing-helper" id="game-composer-listing-helper" hidden>
-              Dica: anúncios aceitam até 5 imagens. Use Arquivo para selecionar uma ou várias imagens.
+              Anúncios permitem até 5 imagens. Selecione uma ou várias imagens na mesma janela de envio.
             </p>
             <p class="field-feedback" id="game-composer-feedback" role="status"></p>
           </section>

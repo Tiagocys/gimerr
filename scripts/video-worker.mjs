@@ -191,8 +191,8 @@ function createVideoThumbnail(input, output) {
       "-y",
       "-i", input,
       "-frames:v", "1",
-      "-vf", "scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
-      "-q:v", "3",
+      "-vf", "scale=w='min(640,iw)':h=-2",
+      "-q:v", "8",
       output,
     ], { stdio: ["ignore", "ignore", "pipe"] });
 

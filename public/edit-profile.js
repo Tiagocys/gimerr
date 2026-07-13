@@ -26,16 +26,35 @@ const state = {
   profile: null,
   platformLinks: new Map(),
   avatarUrl: null,
+  telegramPhoneChallenge: null,
+  telegramPhoneUrl: null,
+  telegramPhonePollTimer: null,
   media: {
     avatar: { file: null, objectUrl: null, x: 50, y: 50, zoom: 1 },
   },
 };
 
 const els = {
+  layout: document.querySelector("#edit-profile-layout"),
   displayName: document.querySelector("#display-name"),
   username: document.querySelector("#username"),
   usernameFeedback: document.querySelector("#username-feedback"),
   phone: document.querySelector("#phone"),
+  telegramPhoneVerify: document.querySelector("#telegram-phone-verify"),
+  telegramPhoneFeedback: document.querySelector("#telegram-phone-feedback"),
+  telegramPhoneModal: document.querySelector("#telegram-phone-modal"),
+  telegramPhoneOpen: document.querySelector("#telegram-phone-open"),
+  telegramPhoneCopy: document.querySelector("#telegram-phone-copy"),
+  telegramPhoneCode: document.querySelector("#telegram-phone-code"),
+  telegramPhoneModalClose: document.querySelector("#telegram-phone-modal-close"),
+  telegramPhoneModalFeedback: document.querySelector("#telegram-phone-modal-feedback"),
+  contactChannelField: document.querySelector("#contact-channel-field"),
+  visibilityField: document.querySelector("#visibility-field"),
+  contactPreviewCard: document.querySelector("#contact-preview-card"),
+  contactPreviewAvatar: document.querySelector("#contact-preview-avatar"),
+  contactPreviewName: document.querySelector("#contact-preview-name"),
+  contactPreviewUsername: document.querySelector("#contact-preview-username"),
+  contactPreviewList: document.querySelector("#contact-preview-list"),
   phoneWhatsapp: document.querySelector("#phone-whatsapp"),
   phoneTelegram: document.querySelector("#phone-telegram"),
   saveButton: document.querySelector("#save-profile"),
@@ -69,6 +88,15 @@ function normalizeUsername(value) {
     .slice(0, 24);
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function getUsernameUnlockDate(profile = state.profile) {
   if (!profile?.username_changed_at) return null;
 
@@ -92,10 +120,6 @@ function formatDateTime(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(value);
-}
-
-function normalizePhone(value) {
-  return value.replace(/[^\d+]/g, "");
 }
 
 function validateUsername() {
@@ -128,14 +152,24 @@ function validateUsername() {
   return true;
 }
 
+function showUsernameCooldownFeedback() {
+  const unlockDate = getUsernameUnlockDate();
+  if (!unlockDate || unlockDate <= new Date()) return false;
+
+  els.usernameFeedback.textContent = `Username alterado recentemente. Nova alteração disponível em ${formatDateTime(unlockDate)}.`;
+  els.usernameFeedback.className = "field-feedback is-warning";
+  return true;
+}
+
 function updateUsernameChangeState() {
   const unlockDate = getUsernameUnlockDate();
   const isLocked = Boolean(unlockDate && unlockDate > new Date());
 
-  els.username.disabled = isLocked;
+  els.username.disabled = false;
+  els.username.readOnly = isLocked;
   if (isLocked) {
-    els.usernameFeedback.textContent = `Username alterado recentemente. Nova alteração disponível em ${formatDateTime(unlockDate)}.`;
-    els.usernameFeedback.className = "field-feedback is-warning";
+    els.usernameFeedback.textContent = "";
+    els.usernameFeedback.className = "field-feedback";
     return;
   }
 
@@ -285,6 +319,7 @@ function loadPreview(target) {
   state.media[target].file = file;
   state.media[target].objectUrl = nextUrl;
   resetCropControls(target);
+  if (target === "avatar") renderContactPreview();
 
   if (previousUrl) {
     URL.revokeObjectURL(previousUrl);
@@ -297,6 +332,11 @@ function setSaving(isSaving, label = "Salvando...") {
   els.saveButton.textContent = isSaving ? label : "Salvar alterações";
 }
 
+function setProfileLoading(isLoading) {
+  els.layout?.classList.toggle("is-loading", isLoading);
+  els.saveButton.disabled = isLoading;
+}
+
 function getPhoneVisibility() {
   return document.querySelector('input[name="phoneVisibility"]:checked')?.value || "private";
 }
@@ -307,8 +347,268 @@ function setPhoneVisibility(isPublic) {
   if (input) input.checked = true;
 }
 
+function hasVerifiedPhone(profile = state.profile) {
+  return Boolean(profile?.phone_e164 && profile?.phone_verified_at);
+}
+
+function getPhoneDigits(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function renderContactPreview() {
+  const verified = hasVerifiedPhone();
+  if (els.contactPreviewCard) els.contactPreviewCard.hidden = !verified;
+  if (!verified) return;
+
+  const phone = state.profile?.phone_e164 || "";
+  const phoneDigits = getPhoneDigits(phone);
+  const isPublic = getPhoneVisibility() === "public";
+  const displayName = els.displayName.value.trim() || state.profile?.display_name || "Usuário Gimerr";
+  const username = normalizeUsername(els.username.value) || state.profile?.username || "usuario";
+  const showWhatsapp = isPublic && Boolean(els.phoneWhatsapp.checked) && phoneDigits;
+  const showTelegram = isPublic && Boolean(els.phoneTelegram.checked) && phoneDigits;
+
+  if (els.contactPreviewAvatar) {
+    els.contactPreviewAvatar.src = state.avatarUrl || "./assets/avatar.svg";
+  }
+  if (els.contactPreviewName) {
+    els.contactPreviewName.textContent = displayName;
+  }
+  if (els.contactPreviewUsername) {
+    els.contactPreviewUsername.textContent = `@${username}`;
+  }
+  if (els.contactPreviewList) {
+    els.contactPreviewList.innerHTML = isPublic
+      ? `
+        <a class="info-pill" href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>
+        ${showWhatsapp ? `<a class="info-pill contact-pill whatsapp-contact-pill" href="https://wa.me/${escapeHtml(phoneDigits)}" target="_blank" rel="noopener">
+          <img src="./assets/wtsp.png" alt="">
+          WhatsApp
+        </a>` : ""}
+        ${showTelegram ? `<a class="info-pill contact-pill telegram-contact-button" href="tg://resolve?phone=${escapeHtml(phoneDigits)}">
+          <img src="./assets/telegram.webp" alt="">
+          Telegram
+        </a>` : ""}
+      `
+      : `<span class="contact-preview-empty">Telefone privado. Seus contatos não aparecerão no perfil.</span>`;
+  }
+}
+
 function isPhoneContactSchemaError(error) {
   return /phone_contact_(whatsapp|telegram)/i.test(error?.message || "");
+}
+
+function setTelegramPhoneFeedback(message, className = "") {
+  if (!els.telegramPhoneFeedback) return;
+  els.telegramPhoneFeedback.textContent = message;
+  els.telegramPhoneFeedback.className = `field-feedback ${className}`.trim();
+}
+
+function setTelegramPhoneButton(isLoading, label) {
+  if (!els.telegramPhoneVerify) return;
+  const labelEl = els.telegramPhoneVerify.querySelector("span");
+  els.telegramPhoneVerify.disabled = isLoading;
+  const nextLabel = label || (isLoading ? "Aguardando Telegram..." : "Verificar com Telegram");
+  if (labelEl) {
+    labelEl.textContent = nextLabel;
+  } else {
+    els.telegramPhoneVerify.textContent = nextLabel;
+  }
+}
+
+function setTelegramPhoneModalFeedback(message, className = "") {
+  if (!els.telegramPhoneModalFeedback) return;
+  els.telegramPhoneModalFeedback.textContent = message;
+  els.telegramPhoneModalFeedback.className = `field-feedback ${className}`.trim();
+}
+
+function getTelegramPhoneCommand() {
+  return state.telegramPhoneChallenge ? `/start verify_${state.telegramPhoneChallenge}` : "";
+}
+
+function renderTelegramPhoneModal() {
+  const command = getTelegramPhoneCommand();
+  if (els.telegramPhoneCode) {
+    els.telegramPhoneCode.textContent = command || "Gerando código...";
+  }
+  if (els.telegramPhoneCopy) {
+    els.telegramPhoneCopy.disabled = !command;
+  }
+  if (els.telegramPhoneOpen) {
+    els.telegramPhoneOpen.disabled = !state.telegramPhoneUrl;
+  }
+}
+
+function setTelegramPhoneModalLoading(isLoading) {
+  els.telegramPhoneModal?.classList.toggle("is-loading", isLoading);
+}
+
+function openTelegramPhoneModal() {
+  renderTelegramPhoneModal();
+  setTelegramPhoneModalFeedback("", "");
+  if (els.telegramPhoneModal) els.telegramPhoneModal.hidden = false;
+  els.telegramPhoneOpen?.focus();
+}
+
+function closeTelegramPhoneModal() {
+  if (els.telegramPhoneModal) els.telegramPhoneModal.hidden = true;
+}
+
+function stopTelegramPhonePolling() {
+  if (state.telegramPhonePollTimer) {
+    clearTimeout(state.telegramPhonePollTimer);
+    state.telegramPhonePollTimer = null;
+  }
+}
+
+function renderPhoneVerification() {
+  const verified = hasVerifiedPhone();
+  if (els.phone) {
+    els.phone.readOnly = true;
+    els.phone.value = verified ? state.profile.phone_e164 : "";
+    els.phone.placeholder = verified ? "" : "Verifique pelo Telegram";
+  }
+
+  if (els.contactChannelField) els.contactChannelField.hidden = !verified;
+  if (els.visibilityField) els.visibilityField.hidden = !verified;
+  renderContactPreview();
+
+  if (verified) {
+    setTelegramPhoneButton(false, "Telefone verificado");
+    els.telegramPhoneVerify.disabled = true;
+    setTelegramPhoneFeedback("Telefone verificado pelo Telegram.", "is-success");
+    return;
+  }
+
+  setTelegramPhoneButton(false, "Verificar com Telegram");
+  setTelegramPhoneFeedback("Verifique seu telefone pelo Telegram se quiser exibir contato no perfil.", "");
+}
+
+async function pollTelegramPhoneVerification() {
+  if (!state.telegramPhoneChallenge || hasVerifiedPhone()) return;
+
+  try {
+    const response = await fetch(`/api/telegram/phone-status?challenge=${encodeURIComponent(state.telegramPhoneChallenge)}`, {
+      headers: {
+        authorization: `Bearer ${state.session.access_token}`,
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível consultar o Telegram.");
+
+    if (payload.status === "completed" && payload.phone) {
+      stopTelegramPhonePolling();
+      closeTelegramPhoneModal();
+      state.profile = {
+        ...(state.profile || {}),
+        phone_e164: payload.phone,
+        phone_verified_at: payload.verifiedAt || new Date().toISOString(),
+        phone_contact_telegram: true,
+        phone_contact_whatsapp: false,
+        phone_is_public: false,
+      };
+      els.phoneTelegram.checked = true;
+      els.phoneWhatsapp.checked = false;
+      setPhoneVisibility(false);
+      renderPhoneVerification();
+      return;
+    }
+
+    if (["expired", "failed"].includes(payload.status)) {
+      stopTelegramPhonePolling();
+      state.telegramPhoneChallenge = null;
+      state.telegramPhoneUrl = null;
+      renderTelegramPhoneModal();
+      setTelegramPhoneButton(false, "Verificar com Telegram");
+      setTelegramPhoneFeedback(
+        payload.status === "expired"
+          ? "A verificação expirou. Inicie o processo novamente."
+          : "Não foi possível verificar o telefone. Tente novamente.",
+        "is-error",
+      );
+      setTelegramPhoneModalFeedback(
+        payload.status === "expired"
+          ? "A verificação expirou. Inicie o processo novamente."
+          : "Não foi possível verificar o telefone. Tente novamente.",
+        "is-error",
+      );
+      return;
+    }
+
+    state.telegramPhonePollTimer = setTimeout(pollTelegramPhoneVerification, 3000);
+  } catch (error) {
+    stopTelegramPhonePolling();
+    setTelegramPhoneButton(false, "Verificar com Telegram");
+    setTelegramPhoneFeedback(error.message || "Não foi possível consultar o Telegram.", "is-error");
+  }
+}
+
+async function startTelegramPhoneVerification() {
+  const client = await getAuthenticatedClient();
+  if (!client || hasVerifiedPhone()) return;
+
+  if (state.telegramPhoneChallenge && state.telegramPhoneUrl) {
+    openTelegramPhoneModal();
+    return;
+  }
+
+  stopTelegramPhonePolling();
+  state.telegramPhoneUrl = null;
+  state.telegramPhoneChallenge = null;
+  openTelegramPhoneModal();
+  setTelegramPhoneModalLoading(true);
+  setTelegramPhoneButton(true, "Preparando...");
+  setTelegramPhoneFeedback("Gerando verificação segura no Telegram...", "");
+  setTelegramPhoneModalFeedback("Gerando código seguro...", "");
+
+  try {
+    const response = await fetch("/api/telegram/phone-start", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${state.session.access_token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.url || !payload.challenge) {
+      throw new Error(payload.error || "Não foi possível abrir o Telegram.");
+    }
+
+    state.telegramPhoneChallenge = payload.challenge;
+    state.telegramPhoneUrl = payload.url;
+    renderTelegramPhoneModal();
+    setTelegramPhoneModalLoading(false);
+    setTelegramPhoneButton(false, "Ver instruções");
+    setTelegramPhoneFeedback("No Telegram, toque em Compartilhar telefone. Esta tela será atualizada automaticamente.", "is-warning");
+    setTelegramPhoneModalFeedback("", "");
+    state.telegramPhonePollTimer = setTimeout(pollTelegramPhoneVerification, 3000);
+  } catch (error) {
+    state.telegramPhoneChallenge = null;
+    state.telegramPhoneUrl = null;
+    renderTelegramPhoneModal();
+    setTelegramPhoneModalLoading(false);
+    setTelegramPhoneButton(false, "Verificar com Telegram");
+    setTelegramPhoneFeedback(error.message || "Não foi possível iniciar a verificação.", "is-error");
+    setTelegramPhoneModalFeedback(error.message || "Não foi possível iniciar a verificação.", "is-error");
+  }
+}
+
+function openTelegramPhoneLink() {
+  if (!state.telegramPhoneUrl) return;
+  window.open(state.telegramPhoneUrl, "_blank", "noopener");
+}
+
+async function copyTelegramPhoneCommand() {
+  const command = getTelegramPhoneCommand();
+  if (!command) return;
+
+  try {
+    await navigator.clipboard.writeText(command);
+    setTelegramPhoneModalFeedback("Comando copiado. Cole no chat do bot do Gimerr no Telegram.", "is-success");
+  } catch {
+    setTelegramPhoneModalFeedback("Não foi possível copiar automaticamente. Selecione o comando e copie manualmente.", "is-error");
+  }
 }
 
 function normalizePlatformHandle(value, fallback) {
@@ -443,7 +743,7 @@ async function loadProfile() {
 
   let { data, error } = await client
     .from("profiles")
-    .select("id, display_name, username, username_changed_at, phone_e164, phone_is_public, phone_contact_whatsapp, phone_contact_telegram, avatar_url")
+    .select("id, display_name, username, username_changed_at, phone_e164, phone_is_public, phone_contact_whatsapp, phone_contact_telegram, phone_verified_at, phone_verification_method, avatar_url")
     .eq("id", state.session.user.id)
     .maybeSingle();
 
@@ -475,14 +775,15 @@ async function loadProfile() {
 
   els.displayName.value = data?.display_name || fallbackName;
   els.username.value = data?.username || normalizeUsername(fallbackUsername);
-  els.phone.value = data?.phone_e164 || "";
   els.phoneWhatsapp.checked = Boolean(data?.phone_contact_whatsapp);
   els.phoneTelegram.checked = Boolean(data?.phone_contact_telegram);
   setPhoneVisibility(Boolean(data?.phone_is_public));
+  renderPhoneVerification();
 
   state.avatarUrl = data?.avatar_url || null;
 
   els.avatarPreview.src = state.avatarUrl || "./assets/avatar.svg";
+  renderContactPreview();
 
   updateUsernameChangeState();
   syncPlatformState(platformLinks || []);
@@ -750,19 +1051,19 @@ async function saveProfile() {
       const avatarFile = await prepareProfileImage("avatar");
       setSaving(true, "Enviando foto...");
       state.avatarUrl = await uploadProfileImage("avatar", avatarFile);
+      renderContactPreview();
     }
 
     setSaving(true, "Salvando perfil...");
 
-    const phone = normalizePhone(els.phone.value.trim());
+    const phoneVerified = hasVerifiedPhone();
     const profilePayload = {
       id: state.session.user.id,
       display_name: els.displayName.value.trim() || "Usuário Gimerr",
       username: normalizeUsername(els.username.value),
-      phone_e164: phone || null,
-      phone_is_public: phone ? getPhoneVisibility() === "public" : false,
-      phone_contact_whatsapp: phone ? Boolean(els.phoneWhatsapp.checked) : false,
-      phone_contact_telegram: phone ? Boolean(els.phoneTelegram.checked) : false,
+      phone_is_public: phoneVerified ? getPhoneVisibility() === "public" : false,
+      phone_contact_whatsapp: phoneVerified ? Boolean(els.phoneWhatsapp.checked) : false,
+      phone_contact_telegram: phoneVerified ? Boolean(els.phoneTelegram.checked) : false,
       avatar_url: state.avatarUrl,
     };
 
@@ -803,6 +1104,15 @@ async function saveProfile() {
 }
 
 els.username.addEventListener("input", validateUsername);
+els.username.addEventListener("input", renderContactPreview);
+els.displayName.addEventListener("input", renderContactPreview);
+els.username.addEventListener("focus", showUsernameCooldownFeedback);
+els.username.addEventListener("click", showUsernameCooldownFeedback);
+els.username.addEventListener("keydown", (event) => {
+  if (els.username.readOnly && showUsernameCooldownFeedback()) {
+    event.preventDefault();
+  }
+});
 
 els.platformList.addEventListener("click", (event) => {
   const button = event.target.closest("button");
@@ -824,15 +1134,33 @@ els.platformList.addEventListener("change", (event) => {
 });
 
 els.avatarFile.addEventListener("change", () => loadPreview("avatar"));
+els.avatarPreview?.addEventListener("error", () => {
+  if (els.avatarPreview.dataset.avatarFallbackApplied === "true") return;
+  els.avatarPreview.dataset.avatarFallbackApplied = "true";
+  els.avatarPreview.src = "./assets/avatar.svg";
+});
 
 ["x", "y", "zoom"].forEach((control) => {
   cropControls.avatar[control].addEventListener("input", () => updateCrop("avatar"));
 });
 
 els.saveButton.addEventListener("click", saveProfile);
+els.telegramPhoneVerify?.addEventListener("click", startTelegramPhoneVerification);
+els.phoneWhatsapp?.addEventListener("change", renderContactPreview);
+els.phoneTelegram?.addEventListener("change", renderContactPreview);
+document.querySelectorAll('input[name="phoneVisibility"]').forEach((input) => {
+  input.addEventListener("change", renderContactPreview);
+});
+els.telegramPhoneOpen?.addEventListener("click", openTelegramPhoneLink);
+els.telegramPhoneCopy?.addEventListener("click", copyTelegramPhoneCommand);
+els.telegramPhoneModalClose?.addEventListener("click", closeTelegramPhoneModal);
+els.telegramPhoneModal?.addEventListener("click", (event) => {
+  if (event.target === els.telegramPhoneModal) closeTelegramPhoneModal();
+});
 
 async function init() {
   renderPlatforms();
+  setProfileLoading(true);
 
   try {
     await loadProfile();
@@ -840,6 +1168,8 @@ async function init() {
     await handlePlatformCallbackMessage("twitch");
   } catch (error) {
     els.saveFeedback.textContent = error.message || "Não foi possível carregar o perfil.";
+  } finally {
+    setProfileLoading(false);
   }
 }
 

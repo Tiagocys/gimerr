@@ -10,7 +10,10 @@ function jsonResponse(body, init = {}) {
 }
 
 export async function onRequestGet({ env }) {
-  const rawSupabaseUrl = env.SUPABASE_URL || env.SUPABASE_API_URL || env.SUBABASE_API_URL;
+  const rawSupabaseUrl = env.SUPABASE_URL
+    || env.SUPABASE_API_URL
+    || env.SUBABASE_API_URL
+    || (env.SUPABASE_PROJECT_ID ? `https://${env.SUPABASE_PROJECT_ID}.supabase.co` : "");
   const supabaseAnonKey = env.SUPABASE_ANON_KEY;
   const supabaseUrl = rawSupabaseUrl?.replace(/\/rest\/v1\/?$/, "");
 

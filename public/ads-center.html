@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <title>Central de ads | Gimerr</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Gimerr">
+        <img class="brand-logo" src="./assets/logo.png" alt="Gimerr">
+      </a>
+
+      <div class="search-box">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M10.8 18.1a7.3 7.3 0 1 1 5.1-2.1l4 4-1.4 1.4-4-4a7.3 7.3 0 0 1-3.7 1Zm0-2a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6Z"/>
+        </svg>
+        <input id="ads-search" type="search" placeholder="Buscar no Gimerr" aria-label="Buscar no Gimerr">
+      </div>
+
+      <nav class="top-actions" aria-label="Ações principais">
+        <a class="auth-button" href="./sign-in.html" hidden>Entrar</a>
+        <div class="account-menu" data-account-menu hidden></div>
+      </nav>
+    </header>
+
+    <main class="ads-center-layout">
+      <section class="ads-center-head">
+        <div>
+          <span class="ads-center-kicker">Gimerr Ads</span>
+          <h1>Central de ads</h1>
+          <p>Crie campanhas para divulgar vídeos, anúncios e comunidades dentro do Gimerr.</p>
+        </div>
+        <div class="ads-center-head-actions">
+          <div class="ads-balance-card" aria-label="Saldo da conta de anúncios">
+            <span>Saldo</span>
+            <strong id="ads-account-balance">R$ 0,00</strong>
+          </div>
+          <button class="text-button" id="change-ad-placement" type="button">Escolher posicionamento</button>
+        </div>
+      </section>
+
+      <section class="ads-center-panel" id="ads-center-panel">
+        <div class="ads-center-empty" id="ads-center-empty">
+          <h2>Escolha onde sua campanha vai aparecer</h2>
+          <p>O fluxo será configurado a partir do posicionamento escolhido.</p>
+        </div>
+
+        <div class="ads-center-config" id="ads-center-config" hidden>
+          <div class="ads-selected-head">
+            <div>
+              <span class="status-pill" id="ads-selected-badge">Posicionamento</span>
+              <h2 id="ads-selected-title">Campanha</h2>
+            </div>
+            <p id="ads-selected-copy"></p>
+          </div>
+
+          <div class="ads-scope-grid" aria-label="Escopo inicial da campanha">
+            <article class="ads-scope-card">
+              <strong>Criativo</strong>
+              <p id="ads-creative-scope">Definição do arquivo, prévia e regras de formato.</p>
+            </article>
+            <article class="ads-scope-card">
+              <strong>Posicionamento</strong>
+              <p id="ads-placement-scope">Escolha de onde o anúncio será exibido dentro do Gimerr.</p>
+            </article>
+            <article class="ads-scope-card">
+              <strong>Orçamento</strong>
+              <p>Configuração de valor, duração e limite de entrega da campanha.</p>
+            </article>
+            <article class="ads-scope-card">
+              <strong>Análise e aprovação</strong>
+              <p>Seu anúncio vai passar pela análise da nossa equipe.</p>
+            </article>
+          </div>
+
+          <section class="ads-next-panel" aria-labelledby="ads-creative-title">
+            <div class="ads-next-head">
+              <div>
+                <span class="ads-center-kicker">Próximo passo</span>
+                <h3 id="ads-creative-title">Criativo e destino</h3>
+              </div>
+              <p id="ads-next-step">Envie o criativo e informe para onde o anúncio deve levar o usuário.</p>
+            </div>
+
+            <form class="ads-creative-form" id="ads-creative-form">
+              <div class="field-group">
+                <label for="ads-campaign-name">Nome da campanha</label>
+                <input id="ads-campaign-name" name="campaignName" type="text" maxlength="80" placeholder="Ex: Lançamento do servidor Miracle">
+              </div>
+
+              <div class="field-group">
+                <label for="ads-destination-url">Link de destino</label>
+                <input id="ads-destination-url" name="destinationUrl" type="url" placeholder="https://">
+              </div>
+
+              <div class="ads-creative-upload">
+                <div>
+                  <strong id="ads-creative-upload-title">Criativo do anúncio</strong>
+                  <p id="ads-creative-upload-helper">Selecione o arquivo que será analisado pela equipe do Gimerr.</p>
+                </div>
+                <label class="text-button file-button" for="ads-creative-file">Escolher arquivo</label>
+                <input id="ads-creative-file" type="file" accept="image/*,video/*">
+              </div>
+
+              <div class="ads-creative-preview" id="ads-creative-preview" hidden></div>
+
+              <div class="ads-form-actions">
+                <p class="field-feedback" id="ads-creative-feedback" role="status"></p>
+                <button class="primary-button" id="ads-creative-continue" type="submit">Continuar</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="ads-placement-modal">
+    <section class="ads-type-modal" role="dialog" aria-modal="true" aria-labelledby="ads-placement-title">
+      <div class="modal-head">
+        <h2 id="ads-placement-title">Escolha o posicionamento</h2>
+      </div>
+      <p class="ads-type-copy">
+        Primeiro escolha onde a campanha deve aparecer. Depois ajustaremos formato, criativo, orçamento e pagamento.
+      </p>
+      <div class="ads-type-grid">
+        <button class="ads-type-card" type="button" data-ad-placement="feed">
+          <span class="ads-type-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M5 4h14v2H5V4Zm0 4h14v2H5V8Zm0 4h8v2H5v-2Zm0 4h14v2H5v-2Z"/>
+            </svg>
+          </span>
+          <strong>Anúncios do feed</strong>
+          <span>Exiba anúncios em vídeos de outros usuários ou reserve uma área nativa no feed.</span>
+        </button>
+        <button class="ads-type-card" type="button" data-ad-placement="index-grid">
+          <span class="ads-type-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/>
+            </svg>
+          </span>
+          <strong>Grade de anúncios do index</strong>
+          <span>Exiba anúncios na grade lateral ao lado do feed na página inicial. Apenas desktop e imagens.</span>
+        </button>
+        <button class="ads-type-card" type="button" data-ad-placement="game-pages">
+          <span class="ads-type-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M7 7h10a5 5 0 0 1 4.9 4.1l.8 4.3a3 3 0 0 1-5 2.7L15.8 16H8.2l-1.9 2.1a3 3 0 0 1-5-2.7l.8-4.3A5 5 0 0 1 7 7Zm1 3v2H6v2h2v2h2v-2h2v-2h-2v-2H8Zm8.5 1.2a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Zm2.8 2.8a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"/>
+            </svg>
+          </span>
+          <strong>Página de games</strong>
+          <span>Exiba anúncios no feed de páginas de games específicos.</span>
+        </button>
+        <button class="ads-type-card" type="button" data-ad-placement="marketplace">
+          <span class="ads-type-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M5 6h14l1 5H4l1-5Zm1 7h12v7H6v-7Zm2 2v3h8v-3H8ZM7 3h10v2H7V3Z"/>
+            </svg>
+          </span>
+          <strong>Marketplace</strong>
+          <span>Exiba anúncios em formato de imagem no marketplace da comunidade.</span>
+        </button>
+        <button class="ads-type-card ads-type-card-wide" type="button" data-ad-placement="all-in-one">
+          <span class="ads-type-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 2 3 6.8v10.4L12 22l9-4.8V6.8L12 2Zm0 2.3 5.8 3.1L12 10.5 6.2 7.4 12 4.3ZM5 9.1l6 3.2v6.9l-6-3.2V9.1Zm8 10.1v-6.9l6-3.2V16l-6 3.2Z"/>
+            </svg>
+          </span>
+          <strong>All-in-one</strong>
+          <span>Deixe o Gimerr escolher onde posicionar o seu anúncio.</span>
+        </button>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-client.js"></script>
+  <script src="./user-search.js" defer></script>
+  <script src="./navbar.js" defer></script>
+  <script src="./ads-center.js" defer></script>
+</body>
+</html>

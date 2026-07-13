@@ -2,6 +2,7 @@ import { getR2Object, hasR2Bucket, jsonResponse } from "../../_shared/auth.js";
 
 const ALLOWED_PREFIXES = [
   "game_covers/",
+  "conversation-pics/",
   "market/",
   "posts/",
   "profile-pics/",

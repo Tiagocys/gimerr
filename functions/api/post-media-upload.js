@@ -1,5 +1,4 @@
 import { hasR2Bucket, jsonResponse, putR2Object, requireAuthUser } from "../_shared/auth.js";
-import { requireVerifiedProfile } from "../_shared/verification.js";
 
 const TARGETS = {
   post: {
@@ -43,9 +42,6 @@ export async function onRequestPost({ request, env }) {
 
     const auth = await requireAuthUser(request, env);
     if (auth.error) return auth.error;
-
-    const verification = await requireVerifiedProfile(env, auth.user.id);
-    if (verification.error) return verification.error;
 
     const formData = await request.formData();
     const target = String(formData.get("target") || "post");

@@ -7,7 +7,7 @@ export function isVerifiedProfile(profile) {
 
 export async function getProfileVerification(env, userId) {
   const url = new URL(`${getSupabaseRestUrl(env)}/profiles`);
-  url.searchParams.set("select", "id,verification_status,discord_id,discord_verified_at,status");
+  url.searchParams.set("select", "id,verification_status,discord_id,discord_verified_at,status,phone_e164,phone_verified_at,phone_is_public");
   url.searchParams.set("id", `eq.${userId}`);
   url.searchParams.set("limit", "1");
 

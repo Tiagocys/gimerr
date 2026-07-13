@@ -102,7 +102,7 @@
   function renderImageGalleryAttrs(items) {
     const payload = items
       .filter((item) => item?.url)
-      .slice(0, 5)
+      .slice(0, 15)
       .map((item, index) => ({
         url: item.url,
         alt: `Imagem ${index + 1} do anúncio`,
@@ -449,7 +449,7 @@
               </div>
               <div class="author-copy">
                 <strong>${escapeHtml(authorName)}</strong>
-                <span>${escapeHtml(authorHandle)} · ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
+                <span>${escapeHtml(authorHandle)}</span>
               </div>
             </a>
             <div class="post-card-tools">
@@ -463,11 +463,11 @@
             <span class="channel-game-logo" aria-hidden="true">
               <img src="${escapeHtml(post.game?.coverUrl || "./assets/avatar.svg")}" alt="">
             </span>
-            <span>${escapeHtml(post.game?.name || "Game")}</span>
+            <span>Em ${escapeHtml(post.game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
           </a>
         </div>
       </article>
-      ${renderCommentsSection()}
+      ${post.type === "listing" ? "" : renderCommentsSection()}
     `;
     window.GimerrVideoPlayer?.prepare(els.card);
   }
@@ -656,10 +656,12 @@
     }
 
     state.post = payload.post;
-    await loadComments(postId).catch((error) => {
-      console.warn("Não foi possível carregar comentários.", error);
-      state.commentsError = error.message || "Não foi possível carregar comentários.";
-    });
+    if (state.post?.type !== "listing") {
+      await loadComments(postId).catch((error) => {
+        console.warn("Não foi possível carregar comentários.", error);
+        state.commentsError = error.message || "Não foi possível carregar comentários.";
+      });
+    }
     renderPost();
   }
 

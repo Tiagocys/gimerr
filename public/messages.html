@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <title>Mensagens | Gimerr</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Gimerr">
+        <img class="brand-logo" src="./assets/logo.png" alt="Gimerr">
+      </a>
+
+      <div class="search-box">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M10.8 18.1a7.3 7.3 0 1 1 5.1-2.1l4 4-1.4 1.4-4-4a7.3 7.3 0 0 1-3.7 1Zm0-2a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6Z"/>
+        </svg>
+        <input id="messages-search" type="search" placeholder="Buscar pessoas e conversas" aria-label="Buscar pessoas e conversas">
+      </div>
+
+      <nav class="top-actions" aria-label="Ações principais">
+        <a class="auth-button" href="./sign-in.html" hidden>Entrar</a>
+        <div class="account-menu" data-account-menu hidden></div>
+      </nav>
+    </header>
+
+    <main class="messages-layout" id="messages-layout">
+      <div class="messages-stale-alert" id="messages-stale-alert" hidden>
+        <strong aria-hidden="true">X</strong>
+        <span>Recarregue esta página.</span>
+      </div>
+      <section class="messages-sidebar" aria-label="Conversas">
+        <div class="messages-sidebar-head">
+          <div>
+            <h1>Mensagens</h1>
+            <p>Converse com vendedores, compradores e amigos do Gimerr.</p>
+          </div>
+          <button class="ghost-icon" type="button" aria-label="Nova conversa" disabled>
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M4 4h16v12H7.8L4 20V4Zm2 2v9.2L7 14h11V6H6Zm3 3h6v2H9V9Zm0 3h8v2H9v-2Z"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="messages-type-tabs is-loading" id="messages-type-tabs" role="tablist" aria-label="Filtrar conversas">
+          <button class="messages-type-tab is-active" type="button" data-conversation-type="listing" role="tab" aria-selected="true">
+            <span>Marketplace</span>
+            <small id="marketplace-unread-count" hidden>0</small>
+          </button>
+          <button class="messages-type-tab" type="button" data-conversation-type="direct" role="tab" aria-selected="false">
+            <span>Amigos</span>
+            <small id="friends-unread-count" hidden>0</small>
+          </button>
+          <button class="messages-type-tab" type="button" data-conversation-type="spam" role="tab" aria-selected="false">
+            <span>Spam</span>
+            <small id="spam-unread-count" hidden>0</small>
+          </button>
+        </div>
+
+        <div class="messages-search-panel">
+          <label for="conversation-search">Buscar conversa</label>
+          <input id="conversation-search" type="search" placeholder="Nome ou @username">
+        </div>
+
+        <div class="conversation-list" id="conversation-list">
+          <p class="messages-empty">Carregando conversas...</p>
+        </div>
+      </section>
+
+      <section class="message-thread" aria-label="Conversa selecionada">
+        <header class="message-thread-head is-loading" id="message-thread-head">
+          <div class="message-thread-user">
+            <span class="conversation-avatar">
+              <img id="thread-avatar" src="./assets/avatar.svg" alt="">
+            </span>
+            <div>
+              <strong id="thread-title">Marketplace Gimerr</strong>
+              <span id="thread-subtitle">Carregando mensagens...</span>
+            </div>
+          </div>
+          <a class="text-button" id="thread-profile-link" href="./profile.html" hidden>Ver perfil</a>
+        </header>
+
+        <div class="message-thread-body" id="message-thread-body">
+          <article class="message-bubble is-system">
+            <p>Carregando suas mensagens...</p>
+          </article>
+        </div>
+
+        <footer class="message-composer" aria-label="Enviar mensagem">
+          <button class="ghost-icon" id="message-attach" type="button" aria-label="Anexar imagem" disabled>
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M17.6 6.4a4 4 0 0 0-5.7 0l-6.1 6.1a3 3 0 0 0 4.2 4.2l6.3-6.3 1.4 1.4-6.3 6.3a5 5 0 0 1-7.1-7.1l6.1-6.1a6 6 0 1 1 8.5 8.5l-6.6 6.6-1.4-1.4 6.6-6.6a4 4 0 0 0 0-5.6Z"/>
+            </svg>
+          </button>
+          <input id="message-attachment-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+          <div class="message-attachment-preview" id="message-attachment-preview" hidden></div>
+          <textarea id="message-input" rows="1" placeholder="Escreva uma mensagem" disabled></textarea>
+          <button class="primary-button" id="message-send" type="button" disabled>Enviar</button>
+        </footer>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-client.js"></script>
+  <script src="./user-search.js" defer></script>
+  <script src="./navbar.js" defer></script>
+  <script src="./messages.js" defer></script>
+</body>
+</html>

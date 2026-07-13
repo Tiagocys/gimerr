@@ -54,6 +54,7 @@ const els = {
   recommendationsCount: document.querySelector("#recommendations-count"),
   postsCount: document.querySelector("#posts-count"),
   publicInfo: document.querySelector("#profile-public-info"),
+  messageLink: document.querySelector("#profile-message-link"),
   peopleModal: document.querySelector("#people-modal"),
   peopleModalTitle: document.querySelector("#people-modal-title"),
   peopleModalClose: document.querySelector("#people-modal-close"),
@@ -160,7 +161,7 @@ function renderImageLightboxAttrs(post, alt) {
 function renderImageGalleryAttrs(items) {
   const payload = items
     .filter((item) => item?.url)
-    .slice(0, 5)
+    .slice(0, 15)
     .map((item, index) => ({
       url: item.url,
       alt: `Imagem ${index + 1} do anúncio`,
@@ -557,6 +558,7 @@ async function hydrateAuthenticatedProfile() {
       els.publicInfo.innerHTML = `<span class="profile-handle">Este usuário ainda não existe no Gimerr.</span>`;
       els.feedList.innerHTML = `<div class="post-card empty-state">Nada novo por aqui.</div>`;
       els.editProfileLink.hidden = true;
+      els.messageLink.hidden = true;
       els.followButton.hidden = true;
       els.recommendButton.hidden = true;
       return;
@@ -578,6 +580,7 @@ async function hydrateAuthenticatedProfile() {
 
     const isOwnProfile = profileResult.data.id === user?.id;
     els.editProfileLink.hidden = !isOwnProfile;
+    els.messageLink.hidden = isOwnProfile;
     els.followButton.hidden = isOwnProfile;
     els.recommendButton.hidden = isOwnProfile;
 
@@ -603,6 +606,11 @@ function renderCounts() {
 function renderActions() {
   if (state.loading) return;
   if (state.profileMissing) return;
+  const isOwnProfile = state.session?.user?.id === profileInfo.id;
+  els.messageLink.hidden = isOwnProfile || !profileInfo.id;
+  els.messageLink.href = profileInfo.id
+    ? `./messages?recipientId=${encodeURIComponent(profileInfo.id)}`
+    : "./messages.html";
   els.followButton.disabled = !state.session?.user || !profileInfo.id;
   els.recommendButton.disabled = !state.session?.user || !profileInfo.id;
   els.followButton.textContent = state.following ? "Seguindo" : "Seguir";
@@ -625,13 +633,13 @@ function renderPublicInfo() {
     ? `<a class="info-pill" href="tel:${escapeHtml(profileInfo.phone.replace(/\s/g, ""))}">${escapeHtml(profileInfo.phone)}</a>`
     : "";
   const whatsappItem = profileInfo.phoneVisibility === "public" && profileInfo.phoneContactWhatsapp && phoneDigits
-    ? `<a class="info-pill contact-pill" href="https://wa.me/${escapeHtml(phoneDigits)}" target="_blank" rel="noopener">
+    ? `<a class="info-pill contact-pill whatsapp-contact-pill" href="https://wa.me/${escapeHtml(phoneDigits)}" target="_blank" rel="noopener">
         <img src="./assets/wtsp.png" alt="">
         WhatsApp
       </a>`
     : "";
   const telegramItem = profileInfo.phoneVisibility === "public" && profileInfo.phoneContactTelegram && phoneDigits
-    ? `<a class="info-pill contact-pill" href="tg://resolve?phone=${escapeHtml(phoneDigits)}">
+    ? `<a class="info-pill contact-pill telegram-contact-button" href="tg://resolve?phone=${escapeHtml(phoneDigits)}">
         <img src="./assets/telegram.webp" alt="">
         Telegram
       </a>`
@@ -763,6 +771,15 @@ function formatVideoViewCount(value) {
 
 function renderPostActions(post) {
   const postId = escapeHtml(post.id);
+  if (post.type === "listing") {
+    return `
+      <div class="post-action-bar post-action-bar--listing">
+        <button class="post-action-button" type="button" data-post-share data-post-id="${postId}">
+          Compartilhar
+        </button>
+      </div>
+    `;
+  }
   return `
     <div class="post-action-bar">
       <div class="post-comment-action">
@@ -1157,7 +1174,7 @@ function renderFeed({ prepareVideos = true } = {}) {
               </div>
               <div class="author-copy">
                 <strong>${escapeHtml(authorName)}</strong>
-                <span>${escapeHtml([authorHandle, formatRelativeTime(post.createdAt)].filter(Boolean).join(" · "))}</span>
+                <span>${escapeHtml(authorHandle)}</span>
               </div>
             </a>
             <div class="post-card-tools">
@@ -1171,7 +1188,7 @@ function renderFeed({ prepareVideos = true } = {}) {
             <span class="channel-game-logo" aria-hidden="true">
               <img src="${escapeHtml(post.gameCoverUrl || "./assets/avatar.svg")}" alt="">
             </span>
-            <span>${escapeHtml(post.gameName)}</span>
+            <span>Em ${escapeHtml(post.gameName || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
           </a>
           ${renderPostActions(post)}
         </div>

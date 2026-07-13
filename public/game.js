@@ -186,8 +186,8 @@
   function validateComposerFiles(files, type) {
     if (!files.length) return true;
     if (type === "listing") {
-      if (files.length > 5) {
-        window.alert("Anúncios aceitam até 5 imagens.");
+      if (files.length > 15) {
+        window.alert("Anúncios aceitam até 15 imagens.");
         return false;
       }
       if (files.some((file) => !isImageFile(file))) {
@@ -469,6 +469,15 @@
 
   function renderPostActions(post) {
     const postId = escapeHtml(post.id);
+    if (post.type === "listing") {
+      return `
+        <div class="post-action-bar post-action-bar--listing">
+          <button class="post-action-button" type="button" data-post-share data-post-id="${postId}">
+            Compartilhar
+          </button>
+        </div>
+      `;
+    }
     return `
       <div class="post-action-bar">
         <div class="post-comment-action">
@@ -513,7 +522,7 @@
   function renderImageGalleryAttrs(items) {
     const payload = items
       .filter((item) => item?.url)
-      .slice(0, 5)
+      .slice(0, 15)
       .map((item, index) => ({
         url: item.url,
         alt: `Imagem ${index + 1} do anúncio`,
@@ -941,10 +950,10 @@
     }
     const bySignature = new Map(state.composerSelectedFiles.map((file) => [getFileSignature(file), file]));
     files.forEach((file) => {
-      if (bySignature.size >= 5) return;
+      if (bySignature.size >= 15) return;
       bySignature.set(getFileSignature(file), file);
     });
-    state.composerSelectedFiles = Array.from(bySignature.values()).slice(0, 5);
+    state.composerSelectedFiles = Array.from(bySignature.values()).slice(0, 15);
   }
 
   function renderComposerFile() {
@@ -970,7 +979,7 @@
         : `${files.length} imagens selecionadas`;
     }
     if (els.composerMediaPreviews) {
-      const imageFiles = files.filter(isImageFile).slice(0, 5);
+      const imageFiles = files.filter(isImageFile).slice(0, 15);
       state.composerPreviewUrls = imageFiles.map((file) => URL.createObjectURL(file));
       els.composerMediaPreviews.innerHTML = state.composerPreviewUrls
         .map((url, index) => `
@@ -992,7 +1001,7 @@
         : "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
       const files = getComposerFiles();
       const invalidListingSelection = isListing && (
-        files.length > 5 || files.some((file) => !isImageFile(file))
+        files.length > 15 || files.some((file) => !isImageFile(file))
       );
       if ((!isListing && state.composerSelectedFiles.length) || invalidListingSelection) {
         clearComposerFile();
@@ -1226,7 +1235,7 @@
               </div>
               <div class="author-copy">
                 <strong>${escapeHtml(authorName)}</strong>
-                <span>${escapeHtml([authorHandle, formatRelativeTime(post.createdAt || post.time)].filter(Boolean).join(" · "))}</span>
+                <span>${escapeHtml(authorHandle)}</span>
               </div>
             </a>
             <div class="post-card-tools">
@@ -1240,7 +1249,7 @@
             <span class="channel-game-logo" aria-hidden="true">
               <img src="${escapeHtml(state.game?.coverUrl || "./assets/avatar.svg")}" alt="">
             </span>
-            <span>${escapeHtml(state.game?.name || "Game")}</span>
+            <span>Em ${escapeHtml(state.game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt || post.time))}</span>
           </a>
           ${renderPostActions(post)}
         </div>

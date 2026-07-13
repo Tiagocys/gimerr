@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#111827">
+  <link rel="icon" type="image/png" href="/assets/favicon.png">
+  <title>Configurações | Gimerr</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Gimerr">
+        <img class="brand-logo" src="./assets/logo.png" alt="Gimerr">
+      </a>
+
+      <div class="search-box">
+        <svg aria-hidden="true" viewBox="0 0 24 24">
+          <path d="M10.8 18.1a7.3 7.3 0 1 1 5.1-2.1l4 4-1.4 1.4-4-4a7.3 7.3 0 0 1-3.7 1Zm0-2a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6Z"/>
+        </svg>
+        <input id="settings-search" type="search" placeholder="Buscar no Gimerr" aria-label="Buscar no Gimerr">
+      </div>
+
+      <nav class="top-actions" aria-label="Ações principais">
+        <a class="auth-button" href="./sign-in.html" hidden>Entrar</a>
+        <div class="account-menu" data-account-menu hidden></div>
+      </nav>
+    </header>
+
+    <main class="settings-page">
+      <section class="settings-header">
+        <span class="ads-center-kicker">Conta</span>
+        <h1>Configurações</h1>
+        <p>Gerencie preferências de segurança e privacidade da sua conta.</p>
+      </section>
+
+      <section class="settings-card" aria-labelledby="ignored-users-title">
+        <div class="settings-card-head">
+          <div>
+            <h2 id="ignored-users-title">Usuários ignorados</h2>
+            <p>Posts desses usuários não aparecem no seu feed e mensagens deles ficam na caixa de spam.</p>
+          </div>
+        </div>
+        <div class="ignored-users-list" id="ignored-users-list">
+          <p class="settings-empty">Carregando usuários ignorados...</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./auth-client.js"></script>
+  <script src="./user-search.js" defer></script>
+  <script src="./navbar.js" defer></script>
+  <script src="./settings.js" defer></script>
+</body>
+</html>

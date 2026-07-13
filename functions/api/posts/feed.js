@@ -1,5 +1,6 @@
 import { getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
+import { fetchIgnoredProfileIds, inFilter } from "../../_shared/ignored-users.js";
 
 function toPublicPost(row) {
   return {
@@ -48,12 +49,16 @@ export async function onRequestGet({ request, env }) {
     const limit = cleanNumber(requestUrl.searchParams.get("limit"), 10, { min: 1, max: 15 });
     const offset = cleanNumber(requestUrl.searchParams.get("offset"), 0, { min: 0, max: 5000 });
     const fetchLimit = limit + 1;
+    const ignoredProfileIds = [...(await fetchIgnoredProfileIds(env, auth.user.id))];
 
     const url = new URL(`${getSupabaseRestUrl(env)}/public_feed_posts`);
     url.searchParams.set("select", "*");
     url.searchParams.set("order", "created_at.desc");
     url.searchParams.set("limit", String(fetchLimit));
     if (offset > 0) url.searchParams.set("offset", String(offset));
+    if (ignoredProfileIds.length) {
+      url.searchParams.set("profile_id", `not.${inFilter(ignoredProfileIds)}`);
+    }
 
     const response = await fetch(url.toString(), {
       headers: getServiceHeaders(env),

@@ -6,7 +6,6 @@
   <meta name="theme-color" content="#111827">
   <meta http-equiv="Delegate-CH" content="Sec-CH-UA https://s.magsrv.com; Sec-CH-UA-Mobile https://s.magsrv.com; Sec-CH-UA-Arch https://s.magsrv.com; Sec-CH-UA-Model https://s.magsrv.com; Sec-CH-UA-Platform https://s.magsrv.com; Sec-CH-UA-Platform-Version https://s.magsrv.com; Sec-CH-UA-Bitness https://s.magsrv.com; Sec-CH-UA-Full-Version-List https://s.magsrv.com; Sec-CH-UA-Full-Version https://s.magsrv.com;">
   <link rel="icon" type="image/png" href="/assets/favicon.png">
-  <meta name="6a97888e-site-verification" content="fb4412f2ac7609987726bf44a5672183">
   <title>Gimerr</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
@@ -62,10 +61,33 @@
         </div>
 
         <section class="composer" id="composer">
+          <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação">
+            <button class="tab-button is-active" type="button" data-composer-mode="post">Post</button>
+            <button class="tab-button" type="button" data-composer-mode="listing">Anúncio</button>
+          </div>
           <textarea id="composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser."></textarea>
           <div class="composer-mention-suggestions" id="composer-mention-suggestions" hidden></div>
+          <div class="listing-composer-fields" id="listing-composer-fields" hidden>
+            <p class="composer-listing-helper" id="composer-listing-helper">Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.</p>
+            <label class="listing-currency-field" for="listing-currency">
+              <span>Moeda dos itens</span>
+              <select id="listing-currency">
+                <option value="BRL">BRL - Real brasileiro</option>
+                <option value="USD">USD - Dólar americano</option>
+                <option value="EUR">EUR - Euro</option>
+                <option value="JPY">JPY - Iene japonês</option>
+                <option value="GBP">GBP - Libra esterlina</option>
+                <option value="CNY">CNY - Yuan chinês</option>
+              </select>
+            </label>
+            <div class="listing-items" id="listing-items"></div>
+            <button class="text-button listing-item-add" id="listing-item-add" type="button">Adicionar item</button>
+          </div>
           <div class="composer-media" id="composer-media" hidden>
-            <span id="composer-file-name"></span>
+            <div class="composer-media-summary">
+              <span id="composer-file-name"></span>
+              <div class="composer-media-previews" id="composer-media-previews"></div>
+            </div>
             <button class="text-button" id="composer-clear-file" type="button">Remover</button>
           </div>
           <div class="composer-footer">
@@ -80,6 +102,7 @@
                 Arquivo
               </label>
               <input id="composer-file" type="file" accept="image/*,video/*">
+              <button class="text-button" id="cancel-listing-edit" type="button" hidden>Cancelar edição</button>
               <button class="primary-button" id="publish-post" type="button">Publicar</button>
             </div>
           </div>
@@ -87,9 +110,13 @@
 
         <div class="filter-bar" role="tablist" aria-label="Filtros do feed">
           <button class="filter-chip is-active" type="button" data-filter="all">Tudo</button>
-          <button class="filter-chip" type="button" data-filter="following">Seguindo</button>
-          <button class="filter-chip" type="button" data-filter="video">Vídeos</button>
-          <button class="filter-chip" type="button" data-filter="listing">Marketplace</button>
+          <button class="filter-chip" type="button" data-filter="following">Seguindo <span class="filter-count" data-filter-count="following" hidden>0</span></button>
+          <button class="filter-chip" type="button" data-filter="listing">Marketplace <span class="filter-count" data-filter-count="listing" hidden>0</span></button>
+        </div>
+
+        <div class="marketplace-feed-search" id="marketplace-feed-search" hidden>
+          <label for="marketplace-search">Buscar no Marketplace</label>
+          <input id="marketplace-search" type="search" placeholder="Buscar anúncio, game, item ou vendedor">
         </div>
 
         <div class="feed-list" id="feed-list">
@@ -99,6 +126,28 @@
       </section>
 
       <aside class="right-rail" aria-label="Informações">
+        <section class="panel ad-rail-panel" id="index-ad-rail" data-exoclick-rail>
+          <div class="section-head">
+            <h2>Publicidade</h2>
+            <span>Gimerr</span>
+          </div>
+          <div class="ad-provider-slot" id="index-ad-provider-slot" aria-label="Publicidade externa"></div>
+          <div class="ad-fallback-grid" id="index-ad-fallback-grid" aria-label="Sugestões Gimerr">
+            <a class="ad-fallback-card" href="./game.html">
+              <strong>Descubra novos games</strong>
+              <span>Encontre comunidades e conteúdos recentes.</span>
+            </a>
+            <a class="ad-fallback-card" href="./">
+              <strong>Compartilhe seus clipes</strong>
+              <span>Publique jogadas, imagens e vídeos no feed.</span>
+            </a>
+            <a class="ad-fallback-card" href="./ads-center.html" aria-disabled="true">
+              <strong>Central de Ads</strong>
+              <span>Em breve, anúncios próprios no Gimerr.</span>
+            </a>
+          </div>
+        </section>
+
         <section class="panel live-panel" id="live-panel" hidden>
           <div class="section-head">
             <h2>Agora</h2>
@@ -127,11 +176,19 @@
     </section>
   </div>
 
+  <div class="modal-backdrop" id="listing-detail-modal" hidden>
+    <section class="listing-detail-modal" role="dialog" aria-modal="true" aria-labelledby="listing-detail-title">
+      <button class="ghost-icon listing-detail-close" id="listing-detail-close" type="button" aria-label="Fechar anúncio">x</button>
+      <div id="listing-detail-content"></div>
+    </section>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="./auth-client.js" defer></script>
   <script src="./user-search.js" defer></script>
   <script src="./navbar.js" defer></script>
   <script src="./video-player.js" defer></script>
+  <script src="./exoclick-ads.js" defer></script>
   <script src="./media-lightbox.js" defer></script>
   <script src="./app.js" defer></script>
 </body>

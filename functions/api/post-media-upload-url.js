@@ -1,5 +1,4 @@
 import { createR2PresignedPutUrl, hasR2Bucket, jsonResponse, requireAuthUser } from "../_shared/auth.js";
-import { requireVerifiedProfile } from "../_shared/verification.js";
 
 const TARGETS = {
   video: {
@@ -36,9 +35,6 @@ export async function onRequestPost({ request, env }) {
 
     const auth = await requireAuthUser(request, env);
     if (auth.error) return auth.error;
-
-    const verification = await requireVerifiedProfile(env, auth.user.id);
-    if (verification.error) return verification.error;
 
     const payload = await request.json().catch(() => ({}));
     const target = cleanText(payload.target || "video", 40);

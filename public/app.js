@@ -1,16 +1,32 @@
 let posts = [];
 
 const DISCORD_INVITE_FALLBACK = "https://discord.gg/tCPVFu6juS";
+const LISTING_CURRENCY_SYMBOLS = {
+  BRL: "R$",
+  USD: "$",
+  EUR: "€",
+  JPY: "¥",
+  GBP: "£",
+  CNY: "¥",
+};
 
 const state = {
   filter: "all",
   search: "",
+  marketplaceSearch: "",
+  composerMode: "post",
+  listingCurrency: "BRL",
+  editingListingPostId: "",
   signedIn: false,
   session: null,
+  currentProfile: null,
   followedGames: [],
   followedProfiles: [],
   liveUpdates: [],
   preparedMediaFile: null,
+  composerSelectedFiles: [],
+  composerPreviewUrls: [],
+  listingItemDrafts: [],
   feedLoading: false,
   feedHasMore: true,
   feedOffset: 0,
@@ -22,6 +38,11 @@ const state = {
   commentsLoadingPostId: "",
   commentsByPost: {},
   commentsErrorByPost: {},
+  listingSellerCache: new Map(),
+  filterSeenAt: {
+    following: new Date().toISOString(),
+    listing: new Date().toISOString(),
+  },
   mention: {
     active: false,
     start: -1,
@@ -50,13 +71,24 @@ const els = {
   liveStack: document.querySelector("#live-stack"),
   search: document.querySelector("#global-search"),
   filterButtons: document.querySelectorAll(".filter-chip"),
+  filterCounts: document.querySelectorAll("[data-filter-count]"),
+  marketplaceSearchWrap: document.querySelector("#marketplace-feed-search"),
+  marketplaceSearch: document.querySelector("#marketplace-search"),
+  composerModeButtons: document.querySelectorAll("[data-composer-mode]"),
   composerText: document.querySelector("#composer-text"),
   composerMentionSuggestions: document.querySelector("#composer-mention-suggestions"),
   composerServer: document.querySelector("#composer-server"),
   composerFile: document.querySelector("#composer-file"),
   composerMedia: document.querySelector("#composer-media"),
   composerFileName: document.querySelector("#composer-file-name"),
+  composerMediaPreviews: document.querySelector("#composer-media-previews"),
   composerClearFile: document.querySelector("#composer-clear-file"),
+  listingComposerFields: document.querySelector("#listing-composer-fields"),
+  listingHelper: document.querySelector("#composer-listing-helper"),
+  listingCurrency: document.querySelector("#listing-currency"),
+  listingItems: document.querySelector("#listing-items"),
+  listingItemAdd: document.querySelector("#listing-item-add"),
+  cancelListingEdit: document.querySelector("#cancel-listing-edit"),
   publishPost: document.querySelector("#publish-post"),
   openComposer: document.querySelector("#open-composer"),
   composer: document.querySelector("#composer"),
@@ -65,6 +97,9 @@ const els = {
   verificationFeedback: document.querySelector("#verification-feedback"),
   verificationPrimary: document.querySelector("#verification-primary"),
   verificationClose: document.querySelector("#verification-close"),
+  listingDetailModal: document.querySelector("#listing-detail-modal"),
+  listingDetailContent: document.querySelector("#listing-detail-content"),
+  listingDetailClose: document.querySelector("#listing-detail-close"),
 };
 
 function redirectLegacySharedPostUrl() {
@@ -372,12 +407,19 @@ function isImageFile(file) {
 }
 
 function getComposerAccept() {
+  if (state.composerMode === "listing") return "image/jpeg,image/png,image/webp,image/gif";
   return "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
 }
 
 function getPostTypeFromFile(file) {
   if (isVideoFile(file)) return "video";
   return "post";
+}
+
+function getPostTypeFromComposer(files = []) {
+  if (state.composerMode === "listing") return "listing";
+  const [file] = files;
+  return file ? getPostTypeFromFile(file) : "post";
 }
 
 function validateComposerFile(file) {
@@ -392,6 +434,203 @@ function validateComposerFile(file) {
 
   if (!isImageFile(file)) {
     window.alert("Selecione uma imagem JPG, PNG, WebP, GIF ou um vídeo MP4, WebM ou MOV.");
+    return false;
+  }
+  return true;
+}
+
+function validateComposerFiles(files, type = getPostTypeFromComposer(files)) {
+  if (!files.length) return true;
+  if (type === "listing") {
+    if (files.length > 15) {
+      window.alert("Anúncios aceitam até 15 imagens.");
+      return false;
+    }
+    if (files.some((file) => !isImageFile(file))) {
+      window.alert("Anúncios aceitam apenas imagens JPG, PNG, WebP ou GIF.");
+      return false;
+    }
+    return true;
+  }
+  return validateComposerFile(files[0]);
+}
+
+function getListingCurrency() {
+  return state.listingCurrency || "BRL";
+}
+
+function formatListingPrice(value, currency = getListingCurrency()) {
+  const normalized = String(value || "").replace(/\./g, "").replace(",", ".");
+  const number = Number(normalized);
+  if (!Number.isFinite(number) || number < 0) return "";
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency,
+  }).format(number);
+}
+
+function createListingDraftItem(overrides = {}) {
+  const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return {
+    id,
+    name: "",
+    price: "",
+    file: null,
+    mediaItem: null,
+    previewUrl: "",
+    previewObjectUrl: false,
+    ...overrides,
+  };
+}
+
+function revokeListingPreview(item) {
+  if (item?.previewUrl && item.previewObjectUrl) URL.revokeObjectURL(item.previewUrl);
+}
+
+function resetListingItems() {
+  state.listingItemDrafts.forEach(revokeListingPreview);
+  state.listingItemDrafts = [createListingDraftItem()];
+  renderListingItems(state.listingItemDrafts);
+}
+
+function ensureListingDraftItems() {
+  if (!state.listingItemDrafts.length) {
+    state.listingItemDrafts = [createListingDraftItem()];
+  }
+}
+
+function syncListingDraftsFromDom() {
+  if (!els.listingItems) return;
+  const byId = new Map(state.listingItemDrafts.map((item) => [String(item.id), item]));
+  const rows = Array.from(els.listingItems.querySelectorAll("[data-listing-item-row]"));
+  if (!rows.length) return;
+  state.listingItemDrafts = rows.map((row) => {
+    const id = row.dataset.listingItemId || "";
+    const previous = byId.get(id) || createListingDraftItem({ id });
+    return {
+      ...previous,
+      name: row.querySelector("[data-listing-item-name]")?.value?.trim() || "",
+      price: row.querySelector("[data-listing-item-price]")?.value?.trim() || "",
+    };
+  });
+}
+
+function getListingItemsFromComposer() {
+  return getListingDraftItems()
+    .filter((item) => item.name || item.price || item.file);
+}
+
+function getListingDraftItems() {
+  syncListingDraftsFromDom();
+  ensureListingDraftItems();
+  return state.listingItemDrafts.map((item) => ({
+    ...item,
+    priceLabel: formatListingPrice(item.price),
+  }));
+}
+
+function buildListingBody(text, items) {
+  const itemLines = items
+    .filter((item) => item.name || item.priceLabel)
+    .map((item) => {
+      if (item.name && item.priceLabel) return `${item.name} - ${item.priceLabel}`;
+      return item.name || item.priceLabel;
+    });
+  return [text, itemLines.length ? `Itens:\n${itemLines.join("\n")}` : ""]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function parseListingPriceInput(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const numeric = text
+    .replace(/[^\d.,-]/g, "")
+    .replace(/\./g, "")
+    .replace(",", ".");
+  const number = Number(numeric);
+  return Number.isFinite(number) && number >= 0 ? String(number) : "";
+}
+
+function detectListingCurrency(value) {
+  const text = String(value || "");
+  if (text.includes("US$")) return "USD";
+  if (text.includes("€")) return "EUR";
+  if (text.includes("JP¥")) return "JPY";
+  if (text.includes("£")) return "GBP";
+  if (text.includes("CN¥")) return "CNY";
+  if (text.includes("R$")) return "BRL";
+  return "";
+}
+
+function parseListingBody(body, mediaItems = []) {
+  const text = String(body || "");
+  const marker = "\n\nItens:\n";
+  const markerIndex = text.indexOf(marker);
+  const description = markerIndex >= 0 ? text.slice(0, markerIndex) : "";
+  const itemsText = markerIndex >= 0 ? text.slice(markerIndex + marker.length) : text.replace(/^Itens:\n/i, "");
+  const lines = itemsText.split("\n").map((line) => line.trim()).filter(Boolean);
+  let detectedCurrency = "";
+  const mediaByPosition = new Map(mediaItems
+    .filter((item) => Number.isInteger(Number(item?.position)))
+    .map((item) => [Number(item.position), item]));
+  const mediaByName = new Map(mediaItems
+    .filter((item) => item?.itemName)
+    .map((item) => [String(item.itemName).toLowerCase(), item]));
+  const getMediaForLine = (name, index) => (
+    mediaByPosition.get(index)
+    || mediaByName.get(String(name || "").toLowerCase())
+    || mediaItems[index]
+    || null
+  );
+  const items = lines.map((line, index) => {
+    const [namePart, ...priceParts] = line.split(/\s+-\s+/);
+    const priceLabel = priceParts.join(" - ");
+    if (!detectedCurrency) detectedCurrency = detectListingCurrency(priceLabel);
+    const mediaItem = getMediaForLine(namePart, index);
+    return createListingDraftItem({
+      name: namePart || "",
+      price: parseListingPriceInput(priceLabel),
+      mediaItem,
+      previewUrl: mediaItem?.url || "",
+      previewObjectUrl: false,
+    });
+  });
+  return {
+    description,
+    currency: detectedCurrency || "BRL",
+    items: items.length ? items : [createListingDraftItem()],
+  };
+}
+
+function getListingCardData(post) {
+  const parsed = parseListingBody(post?.body || "", getPostMediaItems(post));
+  return {
+    ...parsed,
+    itemCount: parsed.items.filter((item) => item.name || item.price || item.mediaItem).length,
+  };
+}
+
+function formatListingItemCount(count) {
+  const value = Number(count || 0);
+  if (value === 1) return "1 item";
+  return `${new Intl.NumberFormat("pt-BR").format(value)} itens`;
+}
+
+function truncateText(value, maxLength = 110) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength).trim()}...`;
+}
+
+function validateListingItems(items) {
+  if (!items.length) {
+    window.alert("Adicione pelo menos um item ao anúncio.");
+    return false;
+  }
+  const incomplete = items.some((item) => !item.name || !item.priceLabel);
+  if (incomplete) {
+    window.alert("Cada item do anúncio precisa ter nome e preço.");
     return false;
   }
   return true;
@@ -426,6 +665,8 @@ function renderPostMenu(post) {
       </button>
       <div class="post-menu-popover" hidden>
         ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
+        ${!isOwner && post.author?.id ? `<button type="button" data-user-ignore data-profile-id="${escapeHtml(post.author.id)}">Ignorar usuário</button>` : ""}
+        ${isOwner && isMarketplacePost(post) ? `<button type="button" data-listing-edit data-post-id="${postId}">Editar anúncio</button>` : ""}
         ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Apagar post</button>` : ""}
       </div>
     </div>
@@ -473,6 +714,32 @@ async function reportPost(postId) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Não foi possível denunciar este post.");
   window.alert("Denúncia enviada.");
+}
+
+async function ignoreUser(profileId) {
+  if (!state.session?.access_token) {
+    window.location.assign("./sign-in.html");
+    return;
+  }
+
+  const author = posts.find((post) => post.author?.id === profileId)?.author;
+  const label = author?.displayName || author?.username || "este usuário";
+  if (!window.confirm(`Ignorar ${label}? Os posts deste usuário sairão do seu feed e as mensagens irão para a caixa de spam.`)) return;
+
+  const response = await fetch("/api/users/ignore", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${state.session.access_token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ profileId }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Não foi possível ignorar este usuário.");
+
+  posts = posts.filter((post) => post.author?.id !== profileId);
+  renderFeed({ prepareVideos: false });
 }
 
 function getPostShareUrl(postId) {
@@ -693,6 +960,15 @@ function formatVideoViewCount(value) {
 
 function renderPostActions(post) {
   const postId = escapeHtml(post.id);
+  if (isMarketplacePost(post)) {
+    return `
+      <div class="post-action-bar post-action-bar--listing">
+        <button class="post-action-button" type="button" data-post-share data-post-id="${postId}">
+          Compartilhar
+        </button>
+      </div>
+    `;
+  }
   return `
     <div class="post-action-bar">
       <div class="post-comment-action">
@@ -736,7 +1012,7 @@ function renderImageLightboxAttrs(post, alt) {
 function renderImageGalleryAttrs(items) {
   const payload = items
     .filter((item) => item?.url)
-    .slice(0, 5)
+    .slice(0, 15)
     .map((item, index) => ({
       url: item.url,
       alt: `Imagem ${index + 1} do anúncio`,
@@ -757,7 +1033,29 @@ function renderVideoPoster(post, item) {
   `;
 }
 
+function renderListingMedia(post) {
+  const items = getPostMediaItems(post);
+  const [firstItem] = items;
+  const itemCount = getListingCardData(post).itemCount;
+  const countLabel = formatListingItemCount(itemCount);
+  if (!firstItem?.url) {
+    return `
+      <div class="listing-preview-button listing-placeholder-card">
+        <span class="listing-placeholder-title">Anúncio sem imagem</span>
+        <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
+      </div>
+    `;
+  }
+  return `
+    <div class="listing-preview-button">
+      <img src="${escapeHtml(firstItem.url)}" alt="">
+      <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
+    </div>
+  `;
+}
+
 function renderPostMedia(post) {
+  if (isMarketplacePost(post)) return renderListingMedia(post);
   const items = getPostMediaItems(post);
   if (!items.length) return "";
   const [firstItem] = items;
@@ -777,6 +1075,163 @@ function renderPostMedia(post) {
       <span class="listing-preview-count">+${items.length - 1}</span>
     </button>
   `;
+}
+
+function formatCountLabel(value, singular, plural) {
+  const count = Number(value || 0);
+  const formatted = new Intl.NumberFormat("pt-BR").format(count);
+  return count === 1 ? `1 ${singular}` : `${formatted} ${plural}`;
+}
+
+function getWhatsappUrl(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  return digits ? `https://wa.me/${digits}` : "";
+}
+
+function getPhoneLabel(phone) {
+  return String(phone || "").replace(/^\+/, "+");
+}
+
+function renderSellerContacts(details) {
+  const profile = details?.profile || {};
+  const links = Array.isArray(details?.platformLinks) ? details.platformLinks : [];
+  const contactItems = [];
+  if (profile.phone_e164) {
+    contactItems.push(`<a href="tel:${escapeHtml(profile.phone_e164)}">Telefone: ${escapeHtml(getPhoneLabel(profile.phone_e164))}</a>`);
+    if (profile.phone_contact_whatsapp) {
+      const whatsappUrl = getWhatsappUrl(profile.phone_e164);
+      if (whatsappUrl) contactItems.push(`<a href="${escapeHtml(whatsappUrl)}" target="_blank" rel="noopener">Conversar via WhatsApp</a>`);
+    }
+    if (profile.phone_contact_telegram) {
+      contactItems.push(`<span>Telegram vinculado ao telefone</span>`);
+    }
+  }
+  links.forEach((link) => {
+    const label = `${link.platform || "plataforma"}${link.handle ? `: ${link.handle}` : ""}`;
+    if (link.profile_url) {
+      contactItems.push(`<a href="${escapeHtml(link.profile_url)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`);
+    } else {
+      contactItems.push(`<span>${escapeHtml(label)}</span>`);
+    }
+  });
+  return contactItems.length
+    ? contactItems.map((item) => `<li>${item}</li>`).join("")
+    : `<li><span>Sem contatos públicos.</span></li>`;
+}
+
+function renderListingDetail(post, sellerDetails = null) {
+  const listingData = getListingCardData(post);
+  const game = post.game || getGame(post.gameId);
+  const author = post.author || {};
+  const sellerProfile = sellerDetails?.profile || {};
+  const stats = sellerDetails?.stats || {};
+  const sellerName = sellerProfile.display_name || author.displayName || author.username || "Vendedor Gimerr";
+  const sellerUsername = sellerProfile.username || author.username || "";
+  const sellerAvatar = sellerProfile.avatar_url || author.avatarUrl || "./assets/avatar.svg";
+  const canMessageSeller = author.id && author.id !== state.currentProfile?.id;
+  const items = listingData.items.filter((item) => item.name || item.price || item.mediaItem);
+  const itemList = items.map((item) => `
+    <article class="listing-detail-item">
+      <div class="listing-detail-item-media">
+        ${item.previewUrl ? `<img src="${escapeHtml(item.previewUrl)}" alt="">` : `<span>Sem imagem</span>`}
+      </div>
+      <div>
+        <strong>${escapeHtml(item.name || "Item")}</strong>
+        ${item.priceLabel ? `<span>${escapeHtml(item.priceLabel)}</span>` : ""}
+      </div>
+    </article>
+  `).join("");
+
+  return `
+    <div class="listing-detail-grid">
+      <section class="listing-detail-main">
+        <div class="listing-detail-actions">
+          <button class="post-action-button" type="button" data-post-share data-post-id="${escapeHtml(post.id)}">Compartilhar</button>
+          ${renderPostMenu(post)}
+        </div>
+        <div>
+          <p class="listing-detail-kicker">${escapeHtml(game?.name || "Marketplace")}</p>
+          <h2 id="listing-detail-title">${escapeHtml(formatListingItemCount(listingData.itemCount))}</h2>
+          ${listingData.description ? `<p class="listing-detail-description">${escapeHtml(listingData.description)}</p>` : ""}
+        </div>
+        <div class="listing-detail-items">
+          ${itemList || `<p class="empty-state">Nenhum item informado.</p>`}
+        </div>
+      </section>
+      <aside class="listing-detail-seller">
+        <a class="listing-seller-head" href="${getProfileUrl({ id: author.id, username: sellerUsername })}">
+          <img src="${escapeHtml(sellerAvatar)}" alt="">
+          <span>
+            <strong>${escapeHtml(sellerName)}</strong>
+            ${sellerUsername ? `<small>@${escapeHtml(sellerUsername)}</small>` : ""}
+          </span>
+        </a>
+        <div class="listing-seller-stats">
+          <span>${escapeHtml(formatCountLabel(stats.followers_count, "seguidor", "seguidores"))}</span>
+          <span>${escapeHtml(formatCountLabel(stats.recommendations_count, "recomendação", "recomendações"))}</span>
+        </div>
+        ${canMessageSeller ? `
+          <a class="primary-button listing-message-button" href="./messages?listingPostId=${encodeURIComponent(post.id)}">Enviar mensagem</a>
+        ` : ""}
+        <div class="listing-seller-contact">
+          <strong>Contato</strong>
+          <ul>${renderSellerContacts(sellerDetails)}</ul>
+        </div>
+      </aside>
+    </div>
+  `;
+}
+
+async function loadListingSellerDetails(authorId) {
+  if (!authorId) return null;
+  if (state.listingSellerCache.has(authorId)) return state.listingSellerCache.get(authorId);
+  const client = await window.GimerrAuth.getClient();
+  const [profileResult, statsResult, linksResult] = await Promise.all([
+    client
+      .from("public_profiles")
+      .select("id, display_name, username, avatar_url, phone_e164, phone_contact_whatsapp, phone_contact_telegram")
+      .eq("id", authorId)
+      .maybeSingle(),
+    client
+      .from("public_profile_stats")
+      .select("profile_id, followers_count, recommendations_count")
+      .eq("profile_id", authorId)
+      .maybeSingle(),
+    client
+      .from("public_profile_platform_links")
+      .select("platform, handle, profile_url")
+      .eq("profile_id", authorId),
+  ]);
+  if (profileResult.error) throw profileResult.error;
+  if (statsResult.error) throw statsResult.error;
+  if (linksResult.error) throw linksResult.error;
+  const details = {
+    profile: profileResult.data || {},
+    stats: statsResult.data || {},
+    platformLinks: linksResult.data || [],
+  };
+  state.listingSellerCache.set(authorId, details);
+  return details;
+}
+
+function closeListingDetailModal() {
+  if (!els.listingDetailModal) return;
+  els.listingDetailModal.hidden = true;
+  if (els.listingDetailContent) els.listingDetailContent.innerHTML = "";
+}
+
+async function openListingDetail(postId) {
+  const post = posts.find((item) => String(item.id) === String(postId));
+  if (!post || !isMarketplacePost(post) || !els.listingDetailModal || !els.listingDetailContent) return;
+  els.listingDetailModal.hidden = false;
+  els.listingDetailContent.innerHTML = `<div class="listing-detail-loading">Carregando anúncio...</div>`;
+  try {
+    const sellerDetails = await loadListingSellerDetails(post.author?.id);
+    els.listingDetailContent.innerHTML = renderListingDetail(post, sellerDetails);
+  } catch (error) {
+    console.warn("Não foi possível carregar detalhes do vendedor.", error);
+    els.listingDetailContent.innerHTML = renderListingDetail(post, null);
+  }
 }
 
 function groupCommentsByParent(comments) {
@@ -1131,6 +1586,23 @@ async function loadFollowedGames() {
     .filter((game) => game.id);
 }
 
+async function loadCurrentProfile() {
+  if (!state.session?.user) {
+    state.currentProfile = null;
+    return;
+  }
+
+  const client = await window.GimerrAuth.getClient();
+  const { data, error } = await client
+    .from("profiles")
+    .select("id")
+    .eq("id", state.session.user.id)
+    .maybeSingle();
+
+  if (error) throw error;
+  state.currentProfile = data || null;
+}
+
 async function loadFollowedProfiles() {
   if (!state.session?.user) {
     state.followedProfiles = [];
@@ -1193,15 +1665,108 @@ async function loadFeedPosts({ append = false } = {}) {
   }
 }
 
+function renderListingItems(nextItems = null) {
+  if (!els.listingItems) return;
+  if (Array.isArray(nextItems)) {
+    state.listingItemDrafts = nextItems;
+  } else {
+    syncListingDraftsFromDom();
+  }
+  ensureListingDraftItems();
+  const items = state.listingItemDrafts;
+  const currencySymbol = LISTING_CURRENCY_SYMBOLS[getListingCurrency()] || getListingCurrency();
+  els.listingItems.innerHTML = items.map((item, index) => `
+    <div class="listing-item-row" data-listing-item-row data-listing-item-id="${escapeHtml(item.id)}">
+      <label>
+        <span>Item</span>
+        <input type="text" data-listing-item-name maxlength="60" placeholder="Nome do item" value="${escapeHtml(item.name)}">
+      </label>
+      <label>
+        <span>Preço</span>
+        <div class="price-input">
+          <span>${escapeHtml(currencySymbol)}</span>
+          <input type="number" data-listing-item-price min="0" step="0.01" inputmode="decimal" placeholder="0,00" value="${escapeHtml(item.price)}">
+        </div>
+      </label>
+      <label class="listing-item-image-field">
+        <span>Imagem do item</span>
+        <input type="file" data-listing-item-image accept="image/jpeg,image/png,image/webp,image/gif">
+        <div class="listing-item-image-preview${item.previewUrl ? " has-image" : ""}">
+          ${item.previewUrl ? `<img src="${escapeHtml(item.previewUrl)}" alt="">` : `<span>Selecionar imagem</span>`}
+        </div>
+      </label>
+      <button class="ghost-icon listing-item-remove" type="button" data-listing-item-remove aria-label="Remover item" ${items.length === 1 ? "disabled" : ""}>x</button>
+    </div>
+  `).join("");
+}
+
+function setComposerMode(mode) {
+  state.composerMode = mode === "listing" ? "listing" : "post";
+  els.composer?.classList.toggle("is-listing-mode", state.composerMode === "listing");
+  els.composer?.classList.remove("is-listing-blocked");
+  els.composerModeButtons.forEach((button) => {
+    const active = button.dataset.composerMode === state.composerMode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  });
+  if (els.listingComposerFields) {
+    els.listingComposerFields.hidden = state.composerMode !== "listing";
+  }
+  if (els.listingHelper) {
+    els.listingHelper.textContent = "Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.";
+    els.listingHelper.classList.remove("is-warning");
+  }
+  if (els.composerText && state.followedGames.length) {
+    els.composerText.placeholder = state.composerMode === "listing"
+      ? "Descreva o anúncio, combine entrega ou informe detalhes importantes para o comprador."
+      : "Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser.";
+  }
+  if (els.publishPost && !els.publishPost.disabled) {
+    els.publishPost.textContent = state.editingListingPostId
+      ? "Salvar anúncio"
+      : (state.composerMode === "listing" ? "Publicar anúncio" : "Publicar");
+  }
+  if (state.composerMode === "listing" && els.listingItems && !els.listingItems.children.length) {
+    renderListingItems();
+  }
+  if (els.composerFile) {
+    els.composerFile.multiple = state.composerMode === "listing";
+    els.composerFile.accept = getComposerAccept();
+  }
+  if (state.composerMode === "listing") {
+    clearComposerFile();
+  } else if (state.composerSelectedFiles.length > 1) {
+    clearComposerFile();
+  }
+  setComposerAvailability();
+}
+
 function setComposerAvailability() {
   const canPost = state.followedGames.length > 0;
+  const unavailable = !canPost;
+  els.composer?.classList.remove("is-listing-blocked");
+  if (els.listingHelper) {
+    els.listingHelper.textContent = "Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.";
+    els.listingHelper.classList.remove("is-warning");
+  }
   els.composerFile.accept = getComposerAccept();
-  els.publishPost.textContent = "Publicar";
-  els.composerText.disabled = !canPost;
-  els.composerServer.disabled = !canPost;
-  els.composerFile.disabled = !canPost;
-  els.publishPost.disabled = !canPost;
+  els.composerFile.multiple = state.composerMode === "listing";
+  els.publishPost.textContent = state.editingListingPostId
+    ? "Salvar anúncio"
+    : (state.composerMode === "listing" ? "Publicar anúncio" : "Publicar");
+  els.composerText.disabled = unavailable;
+  els.composerServer.disabled = unavailable || Boolean(state.editingListingPostId);
+  els.composerFile.disabled = unavailable;
+  els.publishPost.disabled = unavailable;
   els.openComposer.disabled = !canPost;
+  els.composerModeButtons.forEach((button) => {
+    button.disabled = !canPost;
+  });
+  if (els.listingCurrency) els.listingCurrency.disabled = unavailable;
+  if (els.listingItemAdd) els.listingItemAdd.disabled = unavailable;
+  els.listingItems?.querySelectorAll("input, button").forEach((field) => {
+    field.disabled = unavailable;
+  });
 
   if (!canPost) {
     els.composerText.placeholder = "Siga pelo menos um game para publicar no feed.";
@@ -1213,6 +1778,35 @@ function setComposerAvailability() {
   els.composerServer.innerHTML = state.followedGames.map((game) => `
     <option value="${escapeHtml(game.id)}">${escapeHtml(game.name)}</option>
   `).join("");
+}
+
+function cancelListingEdit() {
+  state.editingListingPostId = "";
+  if (els.cancelListingEdit) els.cancelListingEdit.hidden = true;
+  els.composerText.value = "";
+  resetListingItems();
+  clearComposerFile();
+  setComposerMode("post");
+  setComposerAvailability();
+}
+
+async function startListingEdit(postId) {
+  const post = posts.find((item) => String(item.id) === String(postId));
+  if (!post || !isMarketplacePost(post)) return;
+  const parsed = parseListingBody(post.body || "", getPostMediaItems(post));
+  state.editingListingPostId = post.id;
+  state.listingCurrency = parsed.currency;
+  if (els.listingCurrency) els.listingCurrency.value = parsed.currency;
+  setComposerMode("listing");
+  els.composerText.value = parsed.description;
+  state.listingItemDrafts.forEach(revokeListingPreview);
+  state.listingItemDrafts = parsed.items;
+  renderListingItems(state.listingItemDrafts);
+  if (els.composerServer) els.composerServer.value = String(post.gameId || "");
+  if (els.cancelListingEdit) els.cancelListingEdit.hidden = false;
+  setComposerAvailability();
+  els.composer.scrollIntoView({ behavior: "smooth", block: "start" });
+  window.setTimeout(() => els.composerText.focus());
 }
 
 function renderFollowedGames() {
@@ -1268,6 +1862,39 @@ function renderFeedLoading() {
   `;
 }
 
+function isMarketplacePost(post) {
+  return post?.type === "listing";
+}
+
+function getPostTime(post) {
+  const time = Date.parse(post?.createdAt || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
+function countNewPostsForFilter(filter) {
+  const followedIds = new Set(state.followedGames.map((game) => String(game.id)));
+  const followedProfileIds = new Set(state.followedProfiles.map((profile) => String(profile.id)));
+  const seenTime = Date.parse(state.filterSeenAt[filter] || "") || 0;
+  return posts.filter((post) => {
+    const matchesFollowedGame = followedIds.has(String(post.gameId));
+    const matchesFollowedProfile = followedProfileIds.has(String(post.author?.id));
+    const matchesFollowedSource = matchesFollowedGame || matchesFollowedProfile;
+    if (getPostTime(post) <= seenTime) return false;
+    if (filter === "following") return matchesFollowedSource && !isMarketplacePost(post);
+    if (filter === "listing") return matchesFollowedSource && isMarketplacePost(post);
+    return false;
+  }).length;
+}
+
+function renderFilterCounts() {
+  els.filterCounts.forEach((badge) => {
+    const filter = badge.dataset.filterCount;
+    const count = countNewPostsForFilter(filter);
+    badge.textContent = count > 99 ? "99+" : String(count);
+    badge.hidden = count <= 0 || state.filter === filter;
+  });
+}
+
 function withTimeout(promise, timeoutMs, message) {
   return Promise.race([
     promise,
@@ -1279,23 +1906,40 @@ function withTimeout(promise, timeoutMs, message) {
 
 function renderFeed({ prepareVideos = true } = {}) {
   const followedIds = new Set(state.followedGames.map((game) => String(game.id)));
+  const followedProfileIds = new Set(state.followedProfiles.map((profile) => String(profile.id)));
   const query = state.search.trim().toLowerCase();
+  const marketplaceQuery = state.marketplaceSearch.trim().toLowerCase();
+  if (els.marketplaceSearchWrap) {
+    els.marketplaceSearchWrap.hidden = state.filter !== "listing";
+  }
+  els.feedList?.classList.toggle("is-marketplace-grid", state.filter === "listing");
   const filtered = posts.filter((post) => {
     const game = post.game || getGame(post.gameId);
     const matchesFollowedGame = followedIds.has(String(post.gameId));
-    const matchesType = state.filter === "all"
-      || state.filter === "following"
-      || post.type === state.filter;
+    const matchesFollowedProfile = followedProfileIds.has(String(post.author?.id));
+    const matchesFollowedSource = matchesFollowedGame || matchesFollowedProfile;
     const matchesSearch = !query || [post.body, game?.name, post.author?.displayName, post.author?.username]
       .join(" ")
       .toLowerCase()
       .includes(query);
-    const matchesScope = state.filter !== "following" || matchesFollowedGame;
-    return matchesScope && matchesType && matchesSearch;
+    const matchesMarketplaceSearch = state.filter !== "listing" || !marketplaceQuery || [
+      post.body,
+      game?.name,
+      post.author?.displayName,
+      post.author?.username,
+    ].join(" ").toLowerCase().includes(marketplaceQuery);
+    const matchesScope = (() => {
+      if (state.filter === "all") return !isMarketplacePost(post);
+      if (state.filter === "following") return matchesFollowedSource && !isMarketplacePost(post);
+      if (state.filter === "listing") return matchesFollowedSource && isMarketplacePost(post);
+      return false;
+    })();
+    return matchesScope && matchesSearch && matchesMarketplaceSearch;
   });
 
   if (!filtered.length && state.feedLoading) {
     renderFeedLoading();
+    renderFilterCounts();
     return;
   }
 
@@ -1311,6 +1955,7 @@ function renderFeed({ prepareVideos = true } = {}) {
       `
       : `<div class="post-card empty-state">Nada novo por aqui.</div>`;
     els.feedList.innerHTML = loaderHtml;
+    renderFilterCounts();
     return;
   }
 
@@ -1320,34 +1965,40 @@ function renderFeed({ prepareVideos = true } = {}) {
     const authorName = author.displayName || "Usuário Gimerr";
     const authorHandle = author.username ? `@${author.username}` : "@gimerr";
     const media = renderPostMedia(post);
+    const listingData = isMarketplacePost(post) ? getListingCardData(post) : null;
+    const bodyText = listingData
+      ? truncateText(listingData.description)
+      : post.body;
+    const isListing = isMarketplacePost(post);
     return `
-      <article class="post-card">
+      <article class="post-card${isListing ? " marketplace-post-card" : ""}" ${isListing ? `data-listing-open data-post-id="${escapeHtml(post.id)}" role="button" tabindex="0"` : ""}>
         ${media}
         <div class="post-body">
-          ${post.type === "listing" ? `<span class="post-marketplace-badge">Anúncio</span>` : ""}
-          ${renderMentionLine(authorName, post)}
+          ${isListing ? "" : renderMentionLine(authorName, post)}
           <div class="post-meta">
-            <a class="author-block" href="${getProfileUrl(author)}">
-              <div class="post-avatar">
-                <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
-              </div>
-              <div class="author-copy">
-                <strong>${escapeHtml(authorName)}</strong>
-                <span>${escapeHtml(authorHandle)} · ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
-              </div>
-            </a>
+            ${isListing ? `<span class="listing-card-spacer" aria-hidden="true"></span>` : `
+              <a class="author-block" href="${getProfileUrl(author)}">
+                <div class="post-avatar">
+                  <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
+                </div>
+                <div class="author-copy">
+                  <strong>${escapeHtml(authorName)}</strong>
+                  <span>${escapeHtml(authorHandle)}</span>
+                </div>
+              </a>
+            `}
             <div class="post-card-tools">
               ${renderPostMenu(post)}
             </div>
           </div>
           <div>
-            ${post.body ? `<p class="post-text">${escapeHtml(post.body)}</p>` : ""}
+            ${bodyText ? `<p class="post-text">${escapeHtml(bodyText)}</p>` : ""}
           </div>
           <a class="channel-line" href="${getGameUrl(game)}">
             <span class="channel-game-logo" aria-hidden="true">
               <img src="${escapeHtml(game?.coverUrl || "./assets/avatar.svg")}" alt="">
             </span>
-            <span>${escapeHtml(game?.name || "Game")}</span>
+            <span>Em ${escapeHtml(game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
           </a>
           ${renderPostActions(post)}
         </div>
@@ -1365,6 +2016,7 @@ function renderFeed({ prepareVideos = true } = {}) {
     : "";
   els.feedList.innerHTML = `${feedHtml}${loaderHtml}`;
   if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
+  renderFilterCounts();
   observeFeedSentinel();
 }
 
@@ -1394,9 +2046,13 @@ async function loadMoreFeedPosts() {
 
 function setFilter(nextFilter) {
   state.filter = nextFilter;
+  if (Object.prototype.hasOwnProperty.call(state.filterSeenAt, nextFilter)) {
+    state.filterSeenAt[nextFilter] = new Date().toISOString();
+  }
   els.filterButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.filter === nextFilter);
   });
+  renderFilterCounts();
   renderFeed();
 }
 
@@ -1470,7 +2126,23 @@ async function uploadComposerMedia(file, target) {
   return payload;
 }
 
-async function createFeedPost({ game, type, text, uploadedMedia }) {
+async function uploadComposerMediaItems(files, target) {
+  if (!files.length) return [];
+  const uploadedItems = [];
+  for (let index = 0; index < files.length; index += 1) {
+    setPublishing(true, files.length > 1 ? `Enviando ${index + 1}/${files.length}...` : "Enviando...");
+    const uploaded = await uploadComposerMedia(files[index], target);
+    uploadedItems.push({
+      url: uploaded.url,
+      key: uploaded.key,
+      mediaType: uploaded.mediaType,
+    });
+  }
+  return uploadedItems;
+}
+
+async function createFeedPost({ game, type, text, uploadedMediaItems }) {
+  const primaryMedia = uploadedMediaItems?.[0] || null;
   const response = await fetch("/api/posts/create", {
     method: "POST",
     headers: {
@@ -1482,9 +2154,10 @@ async function createFeedPost({ game, type, text, uploadedMedia }) {
       gameId: game.id,
       type,
       body: text,
-      mediaUrl: uploadedMedia?.url || null,
-      mediaKey: uploadedMedia?.key || null,
-      mediaType: uploadedMedia?.mediaType || null,
+      mediaUrl: primaryMedia?.url || null,
+      mediaKey: primaryMedia?.key || null,
+      mediaType: primaryMedia?.mediaType || null,
+      mediaItems: type === "listing" ? uploadedMediaItems : [],
     }),
   });
   const payload = await response.json().catch(() => ({}));
@@ -1498,13 +2171,80 @@ async function createFeedPost({ game, type, text, uploadedMedia }) {
   return payload.post;
 }
 
+async function buildListingMediaItemsForSave(items) {
+  const uploadedItems = [];
+  let uploadIndex = 0;
+  const newFilesCount = items.filter((item) => item.file).length;
+  for (const [position, item] of items.entries()) {
+    if (item.file) {
+      uploadIndex += 1;
+      setPublishing(true, newFilesCount > 1 ? `Enviando ${uploadIndex}/${newFilesCount}...` : "Enviando...");
+      const uploaded = await uploadComposerMedia(item.file, "listing");
+      uploadedItems.push({
+        url: uploaded.url,
+        key: uploaded.key,
+        mediaType: uploaded.mediaType,
+        itemName: item.name,
+        position,
+      });
+    } else if (item.mediaItem?.url && item.mediaItem?.key) {
+      uploadedItems.push({
+        url: item.mediaItem.url,
+        key: item.mediaItem.key,
+        mediaType: item.mediaItem.mediaType || "image/jpeg",
+        itemName: item.name || item.mediaItem.itemName || "",
+        position,
+      });
+    }
+  }
+  return uploadedItems;
+}
+
+async function updateFeedListing({ postId, text, uploadedMediaItems }) {
+  const primaryMedia = uploadedMediaItems?.[0] || null;
+  const response = await fetch("/api/posts/update", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${state.session.access_token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      postId,
+      body: text,
+      mediaUrl: primaryMedia?.url || null,
+      mediaKey: primaryMedia?.key || null,
+      mediaType: primaryMedia?.mediaType || null,
+      mediaItems: uploadedMediaItems,
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || "Não foi possível salvar o anúncio.");
+    error.code = payload.code;
+    throw error;
+  }
+  return payload.post;
+}
+
 function setPublishing(isPublishing, label = "Publicar") {
   const unavailable = !state.followedGames.length;
   els.publishPost.disabled = isPublishing || unavailable;
-  els.publishPost.textContent = isPublishing ? label : "Publicar";
+  els.publishPost.textContent = isPublishing
+    ? label
+    : (state.editingListingPostId ? "Salvar anúncio" : (state.composerMode === "listing" ? "Publicar anúncio" : "Publicar"));
   els.composerText.disabled = isPublishing || unavailable;
-  els.composerServer.disabled = isPublishing || unavailable;
+  els.composerServer.disabled = isPublishing || unavailable || Boolean(state.editingListingPostId);
   els.composerFile.disabled = isPublishing || unavailable;
+  els.composerModeButtons.forEach((button) => {
+    button.disabled = isPublishing || unavailable;
+  });
+  if (els.listingCurrency) els.listingCurrency.disabled = isPublishing || unavailable;
+  if (els.listingItemAdd) els.listingItemAdd.disabled = isPublishing || unavailable;
+  if (els.cancelListingEdit) els.cancelListingEdit.disabled = isPublishing;
+  els.listingItems?.querySelectorAll("input, button").forEach((field) => {
+    field.disabled = isPublishing || unavailable;
+  });
 }
 
 async function publishPost() {
@@ -1513,9 +2253,18 @@ async function publishPost() {
   }
 
   const text = els.composerText.value.trim();
-  const [file] = els.composerFile.files;
+  const type = state.composerMode === "listing"
+    ? "listing"
+    : getPostTypeFromComposer(state.composerSelectedFiles);
+  const listingItems = type === "listing" ? getListingItemsFromComposer() : [];
+  const files = type === "listing"
+    ? listingItems.map((item) => item.file).filter(Boolean)
+    : state.composerSelectedFiles;
+  const finalText = type === "listing" ? buildListingBody(text, listingItems) : text;
 
-  if (!text && !file) {
+  if (type === "listing" && !validateListingItems(listingItems)) return;
+
+  if (!finalText && !files.length) {
     els.composerText.focus();
     return;
   }
@@ -1523,15 +2272,34 @@ async function publishPost() {
   const game = getGame(els.composerServer.value);
   if (!game) return;
 
-  const type = file ? getPostTypeFromFile(file) : "post";
+  if (!validateComposerFiles(files, type)) return;
+
   try {
-    const preparedFile = await prepareComposerUploadFile(file, type);
-    if (file && !preparedFile) return;
-    setPublishing(true, preparedFile ? "Enviando..." : "Publicando...");
-    const uploadedMedia = await uploadComposerMedia(preparedFile, type);
-    setPublishing(true, "Publicando...");
-    await createFeedPost({ game, type, text, uploadedMedia });
+    let uploadedMediaItems = [];
+    if (type === "listing") {
+      const imageFiles = listingItems.map((item) => item.file).filter(Boolean);
+      if (!validateComposerFiles(imageFiles, type)) return;
+      uploadedMediaItems = await buildListingMediaItemsForSave(listingItems);
+    } else {
+      const preparedFiles = [];
+      for (const file of files) {
+        const preparedFile = await prepareComposerUploadFile(file, type);
+        if (!preparedFile) return;
+        preparedFiles.push(preparedFile);
+      }
+      setPublishing(true, preparedFiles.length ? "Enviando..." : "Publicando...");
+      uploadedMediaItems = await uploadComposerMediaItems(preparedFiles, type);
+    }
+    setPublishing(true, state.editingListingPostId ? "Salvando..." : "Publicando...");
+    if (state.editingListingPostId) {
+      await updateFeedListing({ postId: state.editingListingPostId, text: finalText, uploadedMediaItems });
+    } else {
+      await createFeedPost({ game, type, text: finalText, uploadedMediaItems });
+    }
     els.composerText.value = "";
+    state.editingListingPostId = "";
+    if (els.cancelListingEdit) els.cancelListingEdit.hidden = true;
+    if (type === "listing") resetListingItems();
     clearComposerFile();
     state.feedOffset = 0;
     state.feedHasMore = true;
@@ -1553,26 +2321,74 @@ async function publishPost() {
   }
 }
 
+function getFileSignature(file) {
+  return [file.name, file.size, file.lastModified, file.type].join(":");
+}
+
+function revokeComposerPreviewUrls() {
+  state.composerPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+  state.composerPreviewUrls = [];
+}
+
+function getComposerFiles() {
+  return state.composerSelectedFiles;
+}
+
+function addComposerSelectedFiles(files) {
+  if (state.composerMode !== "listing") {
+    state.composerSelectedFiles = files.slice(0, 1);
+    return;
+  }
+  const bySignature = new Map(state.composerSelectedFiles.map((file) => [getFileSignature(file), file]));
+  files.forEach((file) => {
+    if (bySignature.size >= 15) return;
+    bySignature.set(getFileSignature(file), file);
+  });
+  state.composerSelectedFiles = Array.from(bySignature.values()).slice(0, 15);
+}
+
 function renderComposerFile() {
-  const [file] = els.composerFile.files;
-  if (!file) {
+  const selectedFiles = Array.from(els.composerFile.files || []);
+  if (selectedFiles.length) addComposerSelectedFiles(selectedFiles);
+  els.composerFile.value = "";
+
+  const files = getComposerFiles();
+  if (!files.length) {
     els.composerMedia.hidden = true;
     els.composerFileName.textContent = "";
+    if (els.composerMediaPreviews) els.composerMediaPreviews.innerHTML = "";
     state.preparedMediaFile = null;
     return;
   }
 
-  if (!validateComposerFile(file)) {
+  const type = getPostTypeFromComposer(files);
+  if (!validateComposerFiles(files, type)) {
     clearComposerFile();
     return;
   }
 
+  revokeComposerPreviewUrls();
   els.composerMedia.hidden = false;
-  els.composerFileName.textContent = file.name;
+  els.composerFileName.textContent = files.length === 1
+    ? files[0].name
+    : `${files.length} imagens selecionadas`;
+  if (els.composerMediaPreviews) {
+    const imageFiles = files.filter(isImageFile).slice(0, 15);
+    state.composerPreviewUrls = imageFiles.map((file) => URL.createObjectURL(file));
+    els.composerMediaPreviews.innerHTML = state.composerPreviewUrls
+      .map((url, index) => `
+        <figure class="composer-media-preview">
+          <img src="${escapeHtml(url)}" alt="Imagem selecionada ${index + 1}">
+        </figure>
+      `)
+      .join("");
+  }
   state.preparedMediaFile = null;
 }
 
 function clearComposerFile() {
+  revokeComposerPreviewUrls();
+  state.composerSelectedFiles = [];
   els.composerFile.value = "";
   renderComposerFile();
 }
@@ -1584,6 +2400,67 @@ els.filterButtons.forEach((button) => {
 els.search.addEventListener("input", (event) => {
   state.search = event.target.value;
   renderFeed();
+});
+
+els.marketplaceSearch?.addEventListener("input", (event) => {
+  state.marketplaceSearch = event.target.value;
+  renderFeed();
+});
+
+els.composerModeButtons.forEach((button) => {
+  button.addEventListener("click", () => setComposerMode(button.dataset.composerMode));
+});
+
+els.listingCurrency?.addEventListener("change", (event) => {
+  syncListingDraftsFromDom();
+  state.listingCurrency = event.target.value || "BRL";
+  renderListingItems(state.listingItemDrafts);
+});
+
+els.listingItemAdd?.addEventListener("click", () => {
+  const items = getListingDraftItems();
+  if (items.length >= 15) return;
+  items.push(createListingDraftItem());
+  renderListingItems(items);
+});
+
+els.listingItems?.addEventListener("click", (event) => {
+  const removeButton = event.target instanceof Element
+    ? event.target.closest("[data-listing-item-remove]")
+    : null;
+  if (!removeButton) return;
+  const row = removeButton.closest("[data-listing-item-row]");
+  if (!row || state.listingItemDrafts.length <= 1) return;
+  syncListingDraftsFromDom();
+  const removedId = row.dataset.listingItemId || "";
+  const removed = state.listingItemDrafts.find((item) => String(item.id) === String(removedId));
+  revokeListingPreview(removed);
+  state.listingItemDrafts = state.listingItemDrafts.filter((item) => String(item.id) !== String(removedId));
+  renderListingItems(state.listingItemDrafts);
+});
+
+els.listingItems?.addEventListener("change", (event) => {
+  const input = event.target instanceof Element
+    ? event.target.closest("[data-listing-item-image]")
+    : null;
+  if (!input) return;
+  const row = input.closest("[data-listing-item-row]");
+  const file = input.files?.[0] || null;
+  if (!row || !file) return;
+  if (!isImageFile(file)) {
+    window.alert("Selecione uma imagem JPG, PNG, WebP ou GIF.");
+    input.value = "";
+    return;
+  }
+  syncListingDraftsFromDom();
+  const item = state.listingItemDrafts.find((draft) => String(draft.id) === String(row.dataset.listingItemId || ""));
+  if (!item) return;
+  revokeListingPreview(item);
+  item.file = file;
+  item.mediaItem = null;
+  item.previewUrl = URL.createObjectURL(file);
+  item.previewObjectUrl = true;
+  renderListingItems(state.listingItemDrafts);
 });
 
 els.composerText.addEventListener("input", updateMentionSuggestions);
@@ -1612,6 +2489,20 @@ els.composerText.addEventListener("keydown", (event) => {
   }
 });
 
+document.addEventListener("keydown", async (event) => {
+  if (event.key === "Escape" && !els.listingDetailModal?.hidden) {
+    closeListingDetailModal();
+    return;
+  }
+  if ((event.key === "Enter" || event.key === " ") && event.target instanceof Element) {
+    const listingCard = event.target.closest("[data-listing-open]");
+    if (listingCard && event.target === listingCard) {
+      event.preventDefault();
+      await openListingDetail(listingCard.dataset.postId || "");
+    }
+  }
+});
+
 els.composerMentionSuggestions?.addEventListener("mousedown", (event) => {
   const button = event.target instanceof Element
     ? event.target.closest("[data-mention-index]")
@@ -1625,6 +2516,11 @@ els.composerMentionSuggestions?.addEventListener("mousedown", (event) => {
 els.publishPost.addEventListener("click", publishPost);
 els.composerFile.addEventListener("change", renderComposerFile);
 els.composerClearFile.addEventListener("click", clearComposerFile);
+els.cancelListingEdit?.addEventListener("click", cancelListingEdit);
+els.listingDetailClose?.addEventListener("click", closeListingDetailModal);
+els.listingDetailModal?.addEventListener("click", (event) => {
+  if (event.target === els.listingDetailModal) closeListingDetailModal();
+});
 els.verificationClose.addEventListener("click", closeVerificationModal);
 els.verificationSteps.addEventListener("click", async (event) => {
   const button = event.target instanceof Element
@@ -1686,6 +2582,27 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  const ignoreButton = target.closest("[data-user-ignore]");
+  if (ignoreButton) {
+    event.preventDefault();
+    closePostMenus();
+    try {
+      await ignoreUser(ignoreButton.dataset.profileId || "");
+    } catch (error) {
+      console.warn("Não foi possível ignorar usuário.", error);
+      window.alert(error.message || "Não foi possível ignorar este usuário.");
+    }
+    return;
+  }
+
+  const editListingButton = target.closest("[data-listing-edit]");
+  if (editListingButton) {
+    event.preventDefault();
+    closePostMenus();
+    await startListingEdit(editListingButton.dataset.postId || "");
+    return;
+  }
+
   const shareButton = target.closest("[data-post-share]");
   if (shareButton) {
     event.preventDefault();
@@ -1697,6 +2614,13 @@ document.addEventListener("click", async (event) => {
       console.warn("Não foi possível compartilhar post.", error);
       window.alert("Não foi possível compartilhar este post.");
     }
+    return;
+  }
+
+  const listingCard = target.closest("[data-listing-open]");
+  if (listingCard) {
+    event.preventDefault();
+    await openListingDetail(listingCard.dataset.postId || "");
     return;
   }
 
@@ -1923,6 +2847,15 @@ async function init() {
       state.followedProfiles = [];
     });
 
+  const currentProfilePromise = withTimeout(loadCurrentProfile(), 12000, "O perfil demorou mais que o esperado.")
+    .catch((error) => {
+      console.warn("Não foi possível carregar telefone verificado.", error);
+      state.currentProfile = null;
+    })
+    .finally(() => {
+      setComposerAvailability();
+    });
+
   const feedPromise = withTimeout(loadFeedPosts(), 12000, "O feed demorou mais que o esperado.")
     .then(() => {
       renderFeed();
@@ -1934,7 +2867,7 @@ async function init() {
       renderFeed();
     });
 
-  await Promise.allSettled([followedPromise, followedProfilesPromise, feedPromise]);
+  await Promise.allSettled([followedPromise, followedProfilesPromise, currentProfilePromise, feedPromise]);
 }
 
 init();

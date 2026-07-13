@@ -1,5 +1,6 @@
 import { getSupabaseRestUrl, getSupabaseUrl, jsonResponse } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
+import { fetchIgnoredProfileIds, inFilter } from "../../_shared/ignored-users.js";
 
 function cleanText(value, maxLength) {
   return String(value || "")
@@ -149,12 +150,16 @@ async function fetchIsFollowing(env, gameId, userId) {
   return rows.length > 0;
 }
 
-async function fetchGamePosts(env, gameId) {
+async function fetchGamePosts(env, gameId, ignoredProfileIds = new Set()) {
   const url = new URL(`${getSupabaseRestUrl(env)}/public_feed_posts`);
   url.searchParams.set("select", "*");
   url.searchParams.set("game_igdb_id", `eq.${gameId}`);
   url.searchParams.set("order", "created_at.desc");
   url.searchParams.set("limit", "50");
+  const ignoredIds = [...ignoredProfileIds];
+  if (ignoredIds.length) {
+    url.searchParams.set("profile_id", `not.${inFilter(ignoredIds)}`);
+  }
 
   const response = await fetch(url.toString(), {
     headers: getServiceHeaders(env),
@@ -173,10 +178,11 @@ export async function onRequestGet({ request, env }) {
     }
 
     const user = await getOptionalAuthUser(request, env);
+    const ignoredProfileIds = user?.id ? await fetchIgnoredProfileIds(env, user.id) : new Set();
     const [{ followerCount, followers }, isFollowing, feed] = await Promise.all([
       fetchFollowers(env, game.igdb_id),
       fetchIsFollowing(env, game.igdb_id, user?.id),
-      fetchGamePosts(env, game.igdb_id),
+      fetchGamePosts(env, game.igdb_id, ignoredProfileIds),
     ]);
 
     return jsonResponse({

@@ -902,11 +902,11 @@
 
         const gamePayload = await gameResponse.json().catch(() => ({}));
         if (!gameResponse.ok) {
-          throw new Error(gamePayload.error || "Não foi possível buscar jogos.");
+          console.warn("Não foi possível buscar jogos.", gamePayload.error || gameResponse.status);
         }
 
         const users = userResult.data || [];
-        const games = gamePayload.games || [];
+        const games = gameResponse.ok ? (gamePayload.games || []) : [];
 
         if (options.forceRemote && !users.length && !games.length) {
           showGameSubmitPrompt(term);

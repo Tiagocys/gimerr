@@ -13,6 +13,11 @@
     notificationsLoaded: false,
     notificationsLoading: false,
     unreadCount: 0,
+    unreadMessagesCount: 0,
+    messagesLoading: false,
+    notificationsPollTimer: 0,
+    messagesPollTimer: 0,
+    navbarPollingPaused: false,
   };
 
   function escapeHtml(value) {
@@ -44,7 +49,9 @@
   }
 
   function getAvatarUrl(user, profile) {
-    return profile?.avatar_url || "./assets/avatar.svg";
+    const avatarUrl = String(profile?.avatar_url || "");
+    if (avatarUrl.includes("googleusercontent.com")) return "./assets/avatar.svg";
+    return avatarUrl || "./assets/avatar.svg";
   }
 
   function getPublicProfileUrl(user, profile) {
@@ -87,6 +94,25 @@
     `;
     topActions.insertBefore(root, authLink);
     return root;
+  }
+
+  function ensureMessagesLink() {
+    let link = document.querySelector("[data-messages-link]");
+    if (link) return link;
+
+    link = document.createElement("a");
+    link.className = "ghost-icon message-nav-link";
+    link.href = "./messages.html";
+    link.setAttribute("aria-label", "Mensagens");
+    link.dataset.messagesLink = "";
+    link.innerHTML = `
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path d="M4 4h16v12H7.8L4 20V4Zm2 2v9.2L7 14h11V6H6Zm3 3h6v2H9V9Zm0 3h8v2H9v-2Z"/>
+      </svg>
+      <span class="message-badge" data-messages-badge hidden>0</span>
+    `;
+    topActions.insertBefore(link, ensureNotificationMenu());
+    return link;
   }
 
   function formatNotificationTime(value) {
@@ -139,6 +165,40 @@
     }).join("");
   }
 
+  function renderMessagesBadge() {
+    const link = ensureMessagesLink();
+    const badge = link.querySelector("[data-messages-badge]");
+    if (!badge) return;
+
+    if (state.unreadMessagesCount > 0) {
+      badge.hidden = false;
+      badge.textContent = state.unreadMessagesCount > 99 ? "99+" : String(state.unreadMessagesCount);
+    } else {
+      badge.hidden = true;
+      badge.textContent = "0";
+    }
+  }
+
+  function handleUnauthorizedPolling() {
+    stopNavbarPolling();
+    state.session = null;
+    state.profile = null;
+    state.notifications = [];
+    state.unreadCount = 0;
+    state.unreadMessagesCount = 0;
+    state.notificationsLoaded = false;
+    state.notificationsLoading = false;
+    state.messagesLoading = false;
+    setMenuOpen(false);
+    setNotificationsOpen(false);
+    renderNotifications();
+    renderMessagesBadge();
+    authLink.hidden = false;
+    accountMenu.hidden = true;
+    ensureMessagesLink().hidden = true;
+    ensureNotificationMenu().hidden = true;
+  }
+
   async function loadNotifications() {
     if (!state.session?.access_token || state.notificationsLoading) return;
 
@@ -151,6 +211,10 @@
           authorization: `Bearer ${state.session.access_token}`,
         },
       });
+      if (response.status === 401) {
+        handleUnauthorizedPolling();
+        return;
+      }
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Não foi possível carregar notificações.");
 
@@ -164,6 +228,72 @@
       state.notificationsLoading = false;
     }
   }
+
+  async function loadMessagesUnreadCount() {
+    if (!state.session?.access_token || state.messagesLoading) return;
+
+    state.messagesLoading = true;
+    try {
+      const response = await fetch("/api/messages/unread-count", {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${state.session.access_token}`,
+        },
+      });
+      if (response.status === 401) {
+        handleUnauthorizedPolling();
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Não foi possível carregar mensagens.");
+
+      state.unreadMessagesCount = Number(payload.unreadCount || 0);
+      renderMessagesBadge();
+    } catch (error) {
+      console.warn("Não foi possível carregar contador de mensagens.", error);
+    } finally {
+      state.messagesLoading = false;
+    }
+  }
+
+  function startNotificationsPolling() {
+    if (state.navbarPollingPaused) return;
+    window.clearInterval(state.notificationsPollTimer);
+    state.notificationsPollTimer = window.setInterval(() => {
+      if (!document.hidden) loadNotifications();
+    }, 15000);
+  }
+
+  function startMessagesPolling() {
+    if (state.navbarPollingPaused) return;
+    window.clearInterval(state.messagesPollTimer);
+    state.messagesPollTimer = window.setInterval(() => {
+      if (!document.hidden) loadMessagesUnreadCount();
+    }, 15000);
+  }
+
+  function stopNavbarPolling() {
+    state.navbarPollingPaused = true;
+    window.clearInterval(state.notificationsPollTimer);
+    window.clearInterval(state.messagesPollTimer);
+    state.notificationsPollTimer = 0;
+    state.messagesPollTimer = 0;
+  }
+
+  window.addEventListener("gimerr:messages-read", () => {
+    loadMessagesUnreadCount();
+  });
+
+  window.addEventListener("gimerr:messages-page-stale", () => {
+    stopNavbarPolling();
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !state.navbarPollingPaused) {
+      loadNotifications();
+      loadMessagesUnreadCount();
+    }
+  });
 
   async function markNotificationsRead(id = "") {
     if (!state.session?.access_token) return;
@@ -211,6 +341,7 @@
 
     authLink.hidden = true;
     accountMenu.hidden = false;
+    ensureMessagesLink().hidden = false;
     ensureNotificationMenu().hidden = false;
     accountMenu.innerHTML = `
       <button class="account-avatar-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Abrir menu da conta">
@@ -218,9 +349,11 @@
       </button>
       <div class="account-dropdown" role="menu">
         <a href="${profileUrl}" role="menuitem">Ver meu perfil</a>
+        <a href="./messages.html" role="menuitem">Mensagens</a>
         <a href="./edit-profile.html" role="menuitem">Edição de perfil</a>
         ${Number(state.profile?.is_admin || 0) === 1 ? `<a href="./admin.html" role="menuitem">Admin</a>` : ""}
-        <button type="button" role="menuitem" disabled>Configurações <span>em breve</span></button>
+        <a href="./settings.html" role="menuitem">Configurações</a>
+        <button type="button" role="menuitem" disabled>Central de Ads <span>em breve</span></button>
         <button type="button" role="menuitem" data-sign-out>Sair</button>
       </div>
     `;
@@ -250,19 +383,25 @@
       if (!state.session?.user) {
         authLink.hidden = false;
         accountMenu.hidden = true;
+        ensureMessagesLink().hidden = true;
         ensureNotificationMenu().hidden = true;
         return;
       }
 
+      state.navbarPollingPaused = false;
       state.profile = await loadProfile(client, state.session.user.id);
       renderMenu();
       window.setTimeout(() => {
         loadNotifications();
+        loadMessagesUnreadCount();
       }, 1200);
+      startNotificationsPolling();
+      startMessagesPolling();
     } catch (error) {
       console.warn("Não foi possível carregar o menu da conta.", error);
       authLink.hidden = false;
       accountMenu.hidden = true;
+      ensureMessagesLink().hidden = true;
       ensureNotificationMenu().hidden = true;
     }
   }
@@ -284,9 +423,10 @@
     const image = event.target;
     if (!(image instanceof HTMLImageElement)) return;
     const isUserAvatar = image.closest(
-      ".account-avatar-button, .post-avatar, .profile-avatar-large, .user-search-avatar, .notification-avatar, .media-lightbox-avatar",
+      ".account-avatar-button, .post-avatar, .profile-avatar-large, .user-search-avatar, .notification-avatar, .media-lightbox-avatar, .conversation-avatar, .listing-seller-head, .profile-preview-avatar",
     );
-    if (!isUserAvatar || image.dataset.avatarFallbackApplied === "true") return;
+    const usesExternalGoogleAvatar = image.currentSrc.includes("googleusercontent.com") || image.src.includes("googleusercontent.com");
+    if ((!isUserAvatar && !usesExternalGoogleAvatar) || image.dataset.avatarFallbackApplied === "true") return;
     image.dataset.avatarFallbackApplied = "true";
     image.src = "./assets/avatar.svg";
   }, true);

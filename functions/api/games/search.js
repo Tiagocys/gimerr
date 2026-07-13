@@ -108,6 +108,16 @@ function rankGames(query, games) {
     .map((item) => item.game);
 }
 
+function hasPrimaryNameMatch(query, games) {
+  const queryText = normalizeSearchText(query);
+  if (!queryText || queryText.length < 4) return true;
+
+  return games.some((game) => {
+    const name = normalizeSearchText(game.name);
+    return name === queryText || name.startsWith(`${queryText} `) || name.startsWith(queryText);
+  });
+}
+
 async function searchLocalGames(env, query, limit) {
   const queryText = normalizeSearchText(query);
   const url = new URL(`${getSupabaseRestUrl(env)}/igdb_games`);
@@ -140,20 +150,26 @@ export async function onRequestGet({ request, env }) {
     let games = await searchLocalGames(env, query, limit);
     let source = "local";
 
-    if (forceRemote || games.length === 0) {
-      const igdbGamesById = new Map();
-      const igdbGames = await searchIgdbGames(env, query, limit);
-      igdbGames.forEach((game) => igdbGamesById.set(game.id, game));
+    const shouldSearchRemote = forceRemote || games.length === 0 || !hasPrimaryNameMatch(query, games);
+    if (shouldSearchRemote) {
+      try {
+        const igdbGamesById = new Map();
+        const igdbGames = await searchIgdbGames(env, query, limit);
+        igdbGames.forEach((game) => igdbGamesById.set(game.id, game));
 
-      const normalized = [...igdbGamesById.values()]
-        .map((game) => normalizeIgdbGame(game, { importedFrom: forceRemote ? "igdb_forced_search" : "igdb_search" }));
-      const rankedNormalized = rankGames(query, normalized)
-        .slice(0, limit);
+        const normalized = [...igdbGamesById.values()]
+          .map((game) => normalizeIgdbGame(game, { importedFrom: forceRemote ? "igdb_forced_search" : "igdb_search" }));
+        const rankedNormalized = rankGames(query, normalized)
+          .slice(0, limit);
 
-      if (rankedNormalized.length) {
-        await upsertIgdbGames(env, rankedNormalized);
-        games = await searchLocalGames(env, query, limit);
-        source = "igdb";
+        if (rankedNormalized.length) {
+          await upsertIgdbGames(env, rankedNormalized);
+          games = await searchLocalGames(env, query, limit);
+          source = "igdb";
+        }
+      } catch (error) {
+        console.warn("IGDB search unavailable", error);
+        source = games.length ? "local" : "local_unavailable_remote";
       }
     }
 

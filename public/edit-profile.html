@@ -28,7 +28,7 @@
       </nav>
     </header>
 
-    <main class="settings-layout">
+    <main class="settings-layout is-loading" id="edit-profile-layout">
       <section class="settings-head">
         <div>
           <h1>Editar perfil</h1>
@@ -60,10 +60,17 @@
 
           <div class="field-group">
             <label for="phone">Telefone</label>
-            <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="+55 11 99999-9999">
+            <div class="telegram-phone-field">
+              <input id="phone" name="phone" type="tel" autocomplete="tel" placeholder="Verifique pelo Telegram" readonly>
+              <button class="text-button telegram-phone-button" id="telegram-phone-verify" type="button">
+                <img src="./assets/telegram.webp" alt="">
+                <span>Verificar com Telegram</span>
+              </button>
+            </div>
+            <p class="field-feedback" id="telegram-phone-feedback">Verifique seu telefone pelo Telegram se quiser exibir contato no perfil.</p>
           </div>
 
-          <fieldset class="contact-channel-field" id="contact-channel-field">
+          <fieldset class="contact-channel-field" id="contact-channel-field" hidden>
             <legend>Exibir contato pelo telefone</legend>
             <label>
               <input id="phone-whatsapp" type="checkbox" name="phoneWhatsapp">
@@ -75,7 +82,7 @@
             </label>
           </fieldset>
 
-          <fieldset class="visibility-field" id="visibility-field">
+          <fieldset class="visibility-field" id="visibility-field" hidden>
             <legend>Visibilidade do telefone</legend>
             <label>
               <input type="radio" name="phoneVisibility" value="private" checked>
@@ -86,6 +93,23 @@
               <span>Público</span>
             </label>
           </fieldset>
+
+          <section class="contact-preview-card" id="contact-preview-card" aria-labelledby="contact-preview-title" hidden>
+            <div class="contact-preview-head">
+              <span id="contact-preview-title">Prévia no perfil</span>
+              <small>Escolha quais formas de contato serão exibidas no seu perfil.</small>
+            </div>
+            <div class="contact-preview-profile">
+              <div class="contact-preview-avatar">
+                <img id="contact-preview-avatar" src="./assets/avatar.svg" alt="">
+              </div>
+              <div class="contact-preview-copy">
+                <strong id="contact-preview-name">Usuário Gimerr</strong>
+                <span id="contact-preview-username">@usuario</span>
+                <div class="profile-info-list contact-preview-list" id="contact-preview-list"></div>
+              </div>
+            </div>
+          </section>
         </section>
 
         <section class="settings-panel" aria-labelledby="profile-photo-title">
@@ -144,6 +168,36 @@
       <div class="confirm-modal-actions">
         <button class="text-button" id="username-change-cancel" type="button">Cancelar</button>
         <button class="primary-button" id="username-change-confirm" type="button">Prosseguir</button>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" id="telegram-phone-modal" hidden>
+    <section class="telegram-verify-modal" role="dialog" aria-modal="true" aria-labelledby="telegram-phone-title" aria-describedby="telegram-phone-description">
+      <div class="modal-head">
+        <h2 id="telegram-phone-title">Verificação pelo Telegram</h2>
+      </div>
+      <p id="telegram-phone-description">
+        Para verificar seu telefone, você precisa ter o Telegram instalado no celular ou no desktop.
+      </p>
+      <ol class="telegram-verify-steps">
+        <li>
+          <span>Abra o Telegram pelo botão abaixo.</span>
+          <button class="primary-button telegram-open-button" id="telegram-phone-open" type="button">
+            <img src="./assets/telegram.webp" alt="">
+            Abrir Telegram
+          </button>
+        </li>
+        <li>No chat com o bot do Gimerr, toque em <span class="telegram-contact-pill">Compartilhar telefone</span>.</li>
+        <li>Se o botão não funcionar, copie o comando e cole no chat do bot.</li>
+      </ol>
+      <div class="telegram-verify-command">
+        <span id="telegram-phone-code">Gerando código...</span>
+        <button class="text-button" id="telegram-phone-copy" type="button">Copiar</button>
+      </div>
+      <p class="field-feedback" id="telegram-phone-modal-feedback" role="status"></p>
+      <div class="confirm-modal-actions">
+        <button class="text-button" id="telegram-phone-modal-close" type="button">Agora não</button>
       </div>
     </section>
   </div>

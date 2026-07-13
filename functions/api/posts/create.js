@@ -1,15 +1,23 @@
 import { deleteR2Object, getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
-import { requireVerifiedProfile } from "../../_shared/verification.js";
 
 const VALID_TYPES = new Set(["post", "video", "listing"]);
 const VALID_MEDIA_PREFIXES = ["posts/", "videos/", "market/"];
 const VIDEO_MEDIA_PREFIXES = ["videos/originals/", "videos/ready/", "videos/"];
-const MAX_LISTING_MEDIA_ITEMS = 5;
+const MAX_LISTING_MEDIA_ITEMS = 15;
 
 function cleanText(value, maxLength) {
   return String(value || "")
     .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function cleanBodyText(value, maxLength) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
     .trim()
     .slice(0, maxLength);
 }
@@ -60,12 +68,20 @@ function normalizeMediaItems(items, postType) {
     const url = cleanText(item?.url, 500);
     const key = cleanText(item?.key, 500);
     const mediaType = cleanText(item?.mediaType, 120);
+    const itemName = cleanText(item?.itemName, 120);
+    const position = Number.parseInt(String(item?.position ?? ""), 10);
     if (!url || !key || seen.has(key)) continue;
     if (!isValidMediaKeyForType(postType, key)) continue;
     if (postType === "listing" && !mediaType.startsWith("image/")) continue;
     if (postType !== "listing" && normalized.length) continue;
     seen.add(key);
-    normalized.push({ url, key, mediaType });
+    normalized.push({
+      url,
+      key,
+      mediaType,
+      ...(postType === "listing" && itemName ? { itemName } : {}),
+      ...(postType === "listing" && Number.isFinite(position) ? { position } : {}),
+    });
     if (postType === "listing" && normalized.length >= MAX_LISTING_MEDIA_ITEMS) break;
   }
 
@@ -84,6 +100,23 @@ async function userFollowsGame(env, userId, gameId) {
   });
   const rows = await response.json().catch(() => []);
   if (!response.ok) throw new Error(rows.message || "Não foi possível validar o game seguido.");
+  return rows.length > 0;
+}
+
+async function userHasActiveListingForGame(env, userId, gameId) {
+  const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
+  url.searchParams.set("select", "id");
+  url.searchParams.set("profile_id", `eq.${userId}`);
+  url.searchParams.set("game_igdb_id", `eq.${gameId}`);
+  url.searchParams.set("post_type", "eq.listing");
+  url.searchParams.set("status", "eq.active");
+  url.searchParams.set("limit", "1");
+
+  const response = await fetch(url.toString(), {
+    headers: getServiceHeaders(env),
+  });
+  const rows = await response.json().catch(() => []);
+  if (!response.ok) throw new Error(rows.message || "Não foi possível validar seus anúncios ativos.");
   return rows.length > 0;
 }
 
@@ -174,18 +207,17 @@ export async function onRequestPost({ request, env }) {
     const auth = await requireAuthUser(request, env);
     if (auth.error) return auth.error;
 
-    const verification = await requireVerifiedProfile(env, auth.user.id);
-    if (verification.error) return verification.error;
-
     const payload = await request.json().catch(() => ({}));
     const gameId = Number(payload.gameId);
-    const body = cleanText(payload.body, 220);
     const fallbackMediaUrl = cleanText(payload.mediaUrl, 500) || null;
     const fallbackMediaKey = cleanText(payload.mediaKey, 500);
     const fallbackMediaType = cleanText(payload.mediaType, 120) || null;
     const postType = inferPostType(payload.type, fallbackMediaKey, fallbackMediaType);
+    const body = postType === "listing"
+      ? cleanBodyText(payload.body, 1200)
+      : cleanText(payload.body, 220);
     if (postType === "listing" && Array.isArray(payload.mediaItems) && payload.mediaItems.length > MAX_LISTING_MEDIA_ITEMS) {
-      return jsonResponse({ error: "Anúncios aceitam até 5 imagens." }, { status: 400 });
+      return jsonResponse({ error: "Anúncios aceitam até 15 imagens." }, { status: 400 });
     }
 
     let mediaItems = normalizeMediaItems(payload.mediaItems, postType);
@@ -215,6 +247,11 @@ export async function onRequestPost({ request, env }) {
     const follows = await userFollowsGame(env, auth.user.id, gameId);
     if (!follows) {
       return jsonResponse({ error: "Siga este game antes de publicar nele." }, { status: 403 });
+    }
+
+    if (postType === "listing" && await userHasActiveListingForGame(env, auth.user.id, gameId)) {
+      await Promise.allSettled([...new Set(mediaKeys)].map((key) => deleteR2Object(env, key)));
+      return jsonResponse({ error: "Você já tem um anúncio ativo neste jogo." }, { status: 409 });
     }
 
     const post = await insertPost(env, {

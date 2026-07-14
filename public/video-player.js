@@ -251,7 +251,6 @@
     button.replaceWith(video);
     recordVideoView(video);
     await initializeVideo(video);
-    video.play().catch(() => {});
   }
 
   function stopVideo(video) {

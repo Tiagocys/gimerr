@@ -670,17 +670,26 @@ h2 {
 .ad-rail-panel {
   display: grid;
   gap: 12px;
+  position: sticky;
+  top: 86px;
+  align-self: start;
 }
 
 .ad-provider-slot {
   position: relative;
   display: grid;
-  min-height: 174px;
+  width: min(100%, 300px);
+  min-height: 0;
+  aspect-ratio: 300 / 250;
+  justify-self: center;
+  align-content: end;
+  gap: 9px;
   overflow: hidden;
   place-items: center;
   border: 1px dashed #cbd5e1;
   border-radius: 8px;
   background: #f8fafc;
+  padding: 14px;
 }
 
 .ad-provider-slot[hidden] {
@@ -688,16 +697,47 @@ h2 {
 }
 
 .ad-provider-slot.is-loading::before {
-  content: "Carregando publicidade";
+  position: absolute;
+  inset: 0;
+  content: "";
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.68), transparent);
+  animation: skeleton-shimmer 1.25s infinite;
+}
+
+.ad-provider-slot.is-loading::after {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  content: "Publicidade";
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(15, 23, 42, 0.07);
   color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 800;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+.ad-loader-line {
+  display: block;
+  width: 62%;
+  height: 10px;
+  justify-self: start;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.ad-loader-line-wide {
+  width: 82%;
 }
 
 .ad-provider-slot.is-filled {
   min-height: 0;
+  aspect-ratio: auto;
   border: 0;
   background: transparent;
+  padding: 0;
 }
 
 .ad-provider-slot ins {
@@ -716,7 +756,10 @@ h2 {
 
 .ad-fallback-card {
   display: grid;
-  min-height: 120px;
+  width: min(100%, 300px);
+  min-height: 0;
+  aspect-ratio: 300 / 250;
+  justify-self: center;
   align-content: end;
   gap: 5px;
   padding: 14px;
@@ -746,13 +789,22 @@ h2 {
 }
 
 .feed-list.is-marketplace-grid {
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  align-items: stretch;
+  grid-template-columns: repeat(auto-fill, 220px);
+  align-items: start;
+  justify-content: start;
+}
+
+.feed-list.is-marketplace-grid.is-empty {
+  grid-template-columns: 1fr;
 }
 
 .feed-list.is-marketplace-grid .feed-pagination,
 .feed-list.is-marketplace-grid .empty-state {
   grid-column: 1 / -1;
+}
+
+.feed-list.is-marketplace-grid .marketplace-post-card {
+  max-width: 220px;
 }
 
 .feed-skeleton {
@@ -1175,7 +1227,9 @@ select {
 
 .composer.is-listing-mode .composer-actions .upload-button,
 .composer.is-listing-mode .composer-actions #composer-file,
-.composer.is-listing-mode #composer-media {
+.composer.is-listing-mode .composer-actions #game-composer-file,
+.composer.is-listing-mode #composer-media,
+.composer.is-listing-mode #game-composer-media {
   display: none;
 }
 
@@ -1786,16 +1840,26 @@ select {
 .marketplace-post-card {
   display: grid;
   grid-template-rows: auto 1fr;
+  position: relative;
   width: 100%;
+  min-width: 0;
   height: 100%;
   max-width: 520px;
   justify-self: center;
+  align-self: stretch;
 }
 
 .marketplace-post-card .post-body {
-  grid-template-rows: auto minmax(52px, auto) auto auto;
+  align-content: start;
+  grid-template-rows: minmax(1.3em, auto) auto auto;
+  min-width: 0;
   gap: 9px;
   padding: 12px;
+}
+
+.marketplace-post-card .post-body > div {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .marketplace-post-card .post-avatar {
@@ -1804,11 +1868,13 @@ select {
 }
 
 .marketplace-post-card .post-text {
-  display: -webkit-box;
-  min-height: 3.82em;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.92rem;
   line-height: 1.38;
 }
@@ -1822,17 +1888,22 @@ select {
   justify-content: flex-end;
 }
 
-.marketplace-post-card {
-  cursor: pointer;
+.marketplace-card-tools {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
 }
 
-.marketplace-post-card:focus-visible {
-  outline: 3px solid rgba(37, 99, 235, 0.36);
-  outline-offset: 3px;
+.marketplace-card-tools .post-menu-button {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
 }
 
 .marketplace-post-card .listing-preview-button {
   aspect-ratio: 1 / 1;
+  cursor: pointer;
 }
 
 .marketplace-post-card .listing-preview-button img {
@@ -1842,6 +1913,9 @@ select {
 
 .listing-placeholder-card {
   display: grid;
+  width: 100%;
+  min-height: 0;
+  box-sizing: border-box;
   place-items: center;
   border: 0;
   background:
@@ -1851,9 +1925,12 @@ select {
 }
 
 .listing-placeholder-title {
+  max-width: calc(100% - 32px);
+  justify-self: center;
   color: var(--muted);
   font-size: 0.92rem;
   font-weight: 900;
+  text-align: center;
 }
 
 .listing-card-spacer {
@@ -2344,9 +2421,17 @@ video.media-frame {
 
 .listing-preview-button {
   position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
   overflow: hidden;
   aspect-ratio: 16 / 9;
   background: var(--surface-strong);
+  color: inherit;
+  text-align: inherit;
+  box-sizing: border-box;
 }
 
 .listing-preview-button img {
@@ -2354,6 +2439,12 @@ video.media-frame {
   width: 100%;
   height: 100%;
   object-fit: contain;
+}
+
+.listing-preview-button.listing-placeholder-card {
+  display: grid;
+  place-items: center;
+  text-align: center;
 }
 
 .listing-preview-count {
@@ -3283,40 +3374,49 @@ video.media-frame {
 }
 
 .contact-pill {
+  min-height: 38px;
+  padding: 0 12px;
+  border-width: 2px;
+  background: #ffffff;
   text-decoration: none;
 }
 
 .whatsapp-contact-pill {
-  border-color: transparent;
-  background: #49c25b;
-  color: #ffffff;
+  border-color: #67c15e;
+  background: #ffffff;
+  color: #67c15e;
 }
 
 .telegram-contact-button {
-  border-color: transparent;
-  background: #25a2e0;
-  color: #ffffff;
+  border-color: #40b3e0;
+  background: #ffffff;
+  color: #40b3e0;
 }
 
 .whatsapp-contact-pill:hover,
-.whatsapp-contact-pill:focus-visible,
+.whatsapp-contact-pill:focus-visible {
+  color: #67c15e;
+  filter: brightness(0.97);
+}
+
 .telegram-contact-button:hover,
 .telegram-contact-button:focus-visible {
-  color: #ffffff;
-  filter: brightness(0.96);
+  color: #40b3e0;
+  filter: brightness(0.97);
 }
 
 .platform-pill {
   gap: 7px;
-  border-color: transparent;
-  color: #fff;
+  min-height: 38px;
+  padding: 0 12px;
+  border-width: 2px;
+  background: #ffffff;
   text-decoration: none;
 }
 
 .platform-pill:hover,
 .platform-pill:focus-visible {
-  color: #fff;
-  filter: brightness(0.96);
+  filter: brightness(0.97);
 }
 
 .platform-pill img {
@@ -3338,11 +3438,13 @@ video.media-frame {
 }
 
 .platform-pill-discord {
-  background: #5865f2;
+  border-color: #5865f2;
+  color: #5865f2;
 }
 
 .platform-pill-twitch {
-  background: #9146ff;
+  border-color: #9146ff;
+  color: #9146ff;
 }
 
 .contact-pill img {
@@ -3355,6 +3457,11 @@ video.media-frame {
   display: flex;
   gap: 10px;
   padding-bottom: 8px;
+}
+
+.profile-actions #edit-profile-link {
+  justify-content: center;
+  text-align: center;
 }
 
 .profile-stats {
@@ -4110,14 +4217,26 @@ video.media-frame {
   display: grid;
   width: 74px;
   aspect-ratio: 1 / 1;
+  padding: 0;
   overflow: hidden;
   place-items: center;
+  border: 0;
   border-radius: 8px;
   background: var(--surface);
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 900;
   text-align: center;
+}
+
+button.listing-detail-item-media {
+  cursor: pointer;
+}
+
+button.listing-detail-item-media:hover,
+button.listing-detail-item-media:focus-visible {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+  outline: none;
 }
 
 .listing-detail-item-media img {
@@ -5363,6 +5482,9 @@ video.media-frame {
 }
 
 .contact-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 2px;
 }
 
@@ -6011,15 +6133,27 @@ select:focus,
 }
 
 .discord-button {
-  background: #5865f2;
   border-color: #5865f2;
-  color: #ffffff;
+  background: #ffffff;
+  color: var(--ink);
 }
 
 .twitch-button {
-  background: #9146ff;
   border-color: #9146ff;
-  color: #ffffff;
+  background: #ffffff;
+  color: var(--ink);
+}
+
+.discord-button:hover,
+.discord-button:focus-visible {
+  background: rgba(88, 101, 242, 0.08);
+  color: var(--ink);
+}
+
+.twitch-button:hover,
+.twitch-button:focus-visible {
+  background: rgba(145, 70, 255, 0.08);
+  color: var(--ink);
 }
 
 .oauth-button:disabled {

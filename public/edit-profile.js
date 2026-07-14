@@ -265,6 +265,39 @@ function renderPlatforms() {
   `).join("");
 }
 
+function getPlatformMeta(platform) {
+  const id = String(platform || "").toLowerCase();
+  if (id === "discord") return { id, label: "Discord", icon: "./assets/discord.svg" };
+  if (id === "twitch") return { id, label: "Twitch", icon: "./assets/twitch.svg" };
+  return { id, label: getPlatformName(id), icon: "" };
+}
+
+function renderContactPreviewPlatformItems() {
+  return platforms
+    .filter((platform) => platform.connected && platform.isPublic)
+    .map((platform) => {
+      const link = state.platformLinks.get(platform.id) || {};
+      const platformMeta = getPlatformMeta(platform.id);
+      const handleValue = platform.handle || link.handle || platformMeta.label;
+      const handle = handleValue.startsWith("@") ? handleValue : `@${handleValue}`;
+      const profileUrl = platform.id === "discord" && link.external_user_id
+        ? `discord://-/users/${link.external_user_id}`
+        : link.profile_url;
+      const tag = profileUrl ? "a" : "span";
+      const attrs = profileUrl
+        ? `href="${escapeHtml(profileUrl)}" ${platform.id === "discord" ? "" : 'target="_blank" rel="noopener"'}`
+        : "";
+
+      return `
+        <${tag} class="info-pill platform-pill platform-pill-${escapeHtml(platformMeta.id)}" ${attrs} aria-label="${escapeHtml(`${platformMeta.label}: ${handle}`)}" title="${escapeHtml(`${platformMeta.label}: ${handle}`)}">
+          ${platformMeta.icon ? `<img src="${escapeHtml(platformMeta.icon)}" alt="" aria-hidden="true">` : `<strong>${escapeHtml(platformMeta.label.slice(0, 2).toUpperCase())}</strong>`}
+          <span>${escapeHtml(handle)}</span>
+        </${tag}>
+      `;
+    })
+    .join("");
+}
+
 function syncPlatformState(links = []) {
   state.platformLinks = new Map(links.map((link) => [link.platform, link]));
 
@@ -276,6 +309,7 @@ function syncPlatformState(links = []) {
   });
 
   renderPlatforms();
+  renderContactPreview();
 }
 
 function updateCrop(target) {
@@ -357,8 +391,9 @@ function getPhoneDigits(value) {
 
 function renderContactPreview() {
   const verified = hasVerifiedPhone();
-  if (els.contactPreviewCard) els.contactPreviewCard.hidden = !verified;
-  if (!verified) return;
+  const platformItems = renderContactPreviewPlatformItems();
+  if (els.contactPreviewCard) els.contactPreviewCard.hidden = !verified && !platformItems;
+  if (!verified && !platformItems) return;
 
   const phone = state.profile?.phone_e164 || "";
   const phoneDigits = getPhoneDigits(phone);
@@ -378,19 +413,22 @@ function renderContactPreview() {
     els.contactPreviewUsername.textContent = `@${username}`;
   }
   if (els.contactPreviewList) {
-    els.contactPreviewList.innerHTML = isPublic
-      ? `
+    const phoneItems = verified
+      ? isPublic
+        ? `
         <a class="info-pill" href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>
         ${showWhatsapp ? `<a class="info-pill contact-pill whatsapp-contact-pill" href="https://wa.me/${escapeHtml(phoneDigits)}" target="_blank" rel="noopener">
-          <img src="./assets/wtsp.png" alt="">
+          <img src="./assets/whatsapp.svg" alt="">
           WhatsApp
         </a>` : ""}
         ${showTelegram ? `<a class="info-pill contact-pill telegram-contact-button" href="tg://resolve?phone=${escapeHtml(phoneDigits)}">
-          <img src="./assets/telegram.webp" alt="">
+          <img src="./assets/telegram.svg" alt="">
           Telegram
         </a>` : ""}
       `
-      : `<span class="contact-preview-empty">Telefone privado. Seus contatos não aparecerão no perfil.</span>`;
+        : `<span class="contact-preview-empty">Telefone privado. Seus contatos não aparecerão no perfil.</span>`
+      : "";
+    els.contactPreviewList.innerHTML = [phoneItems, platformItems].filter(Boolean).join("");
   }
 }
 
@@ -463,13 +501,14 @@ function stopTelegramPhonePolling() {
 
 function renderPhoneVerification() {
   const verified = hasVerifiedPhone();
+  const isPublic = getPhoneVisibility() === "public";
   if (els.phone) {
     els.phone.readOnly = true;
     els.phone.value = verified ? state.profile.phone_e164 : "";
     els.phone.placeholder = verified ? "" : "Verifique pelo Telegram";
   }
 
-  if (els.contactChannelField) els.contactChannelField.hidden = !verified;
+  if (els.contactChannelField) els.contactChannelField.hidden = !verified || !isPublic;
   if (els.visibilityField) els.visibilityField.hidden = !verified;
   renderContactPreview();
 
@@ -897,6 +936,25 @@ async function savePlatformVisibility(client) {
   });
 }
 
+async function saveSinglePlatformVisibility(platformId, isPublic) {
+  const client = await getAuthenticatedClient();
+  if (!client) return;
+
+  const platform = platforms.find((item) => item.id === platformId);
+  const link = state.platformLinks.get(platformId);
+  if (!platform || !link) return;
+
+  const { error } = await client
+    .from("profile_platform_links")
+    .update({ is_public: Boolean(isPublic) })
+    .eq("profile_id", state.session.user.id)
+    .eq("platform", platformId);
+
+  if (error) throw error;
+
+  state.platformLinks.set(platformId, { ...link, is_public: Boolean(isPublic) });
+}
+
 async function handlePlatformCallbackMessage(platformId) {
   const params = new URLSearchParams(window.location.search);
   const status = params.get(platformId);
@@ -1122,7 +1180,7 @@ els.platformList.addEventListener("click", (event) => {
   connectPlatform(row.dataset.platformId);
 });
 
-els.platformList.addEventListener("change", (event) => {
+els.platformList.addEventListener("change", async (event) => {
   const input = event.target.closest("[data-platform-visibility]");
   const row = event.target.closest("[data-platform-id]");
   if (!input || !row) return;
@@ -1130,7 +1188,22 @@ els.platformList.addEventListener("change", (event) => {
   const platform = platforms.find((item) => item.id === row.dataset.platformId);
   if (!platform || !platform.connected) return;
 
+  const previousValue = platform.isPublic;
   platform.isPublic = input.checked;
+  renderContactPreview();
+
+  input.disabled = true;
+  try {
+    await saveSinglePlatformVisibility(platform.id, input.checked);
+  } catch (error) {
+    platform.isPublic = previousValue;
+    input.checked = previousValue;
+    renderContactPreview();
+    els.saveFeedback.className = "is-error";
+    els.saveFeedback.textContent = "Não foi possível salvar a visibilidade da plataforma.";
+  } finally {
+    input.disabled = false;
+  }
 });
 
 els.avatarFile.addEventListener("change", () => loadPreview("avatar"));
@@ -1149,7 +1222,7 @@ els.telegramPhoneVerify?.addEventListener("click", startTelegramPhoneVerificatio
 els.phoneWhatsapp?.addEventListener("change", renderContactPreview);
 els.phoneTelegram?.addEventListener("change", renderContactPreview);
 document.querySelectorAll('input[name="phoneVisibility"]').forEach((input) => {
-  input.addEventListener("change", renderContactPreview);
+  input.addEventListener("change", renderPhoneVerification);
 });
 els.telegramPhoneOpen?.addEventListener("click", openTelegramPhoneLink);
 els.telegramPhoneCopy?.addEventListener("click", copyTelegramPhoneCommand);

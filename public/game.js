@@ -1,4 +1,13 @@
 (function initGamePage() {
+  const LISTING_CURRENCY_SYMBOLS = {
+    BRL: "R$",
+    USD: "$",
+    EUR: "€",
+    JPY: "¥",
+    GBP: "£",
+    CNY: "¥",
+  };
+
   const state = {
     session: null,
     loading: true,
@@ -16,8 +25,11 @@
     commentsLoadingPostId: "",
     commentsByPost: {},
     commentsErrorByPost: {},
+    composerMode: "post",
     composerPreviewUrls: [],
     composerSelectedFiles: [],
+    listingCurrency: "BRL",
+    listingItemDrafts: [],
     commentMention: {
       active: false,
       start: -1,
@@ -51,8 +63,12 @@
     composerFileName: document.querySelector("#game-composer-file-name"),
     composerMediaPreviews: document.querySelector("#game-composer-media-previews"),
     composerClearFile: document.querySelector("#game-composer-clear-file"),
-    composerListing: document.querySelector("#game-composer-listing"),
+    composerModeButtons: document.querySelectorAll("[data-game-composer-mode]"),
+    listingComposerFields: document.querySelector("#game-listing-composer-fields"),
     composerListingHelper: document.querySelector("#game-composer-listing-helper"),
+    listingCurrency: document.querySelector("#game-listing-currency"),
+    listingItems: document.querySelector("#game-listing-items"),
+    listingItemAdd: document.querySelector("#game-listing-item-add"),
     publishPost: document.querySelector("#game-publish-post"),
     composerFeedback: document.querySelector("#game-composer-feedback"),
   };
@@ -168,13 +184,6 @@
     return output;
   }
 
-  function isMobileVideoUploadDevice() {
-    const userAgent = navigator.userAgent || "";
-    const isMobileOs = /Android|iPhone|iPad|iPod/i.test(userAgent);
-    const isTouchMac = /Macintosh/i.test(userAgent) && navigator.maxTouchPoints > 1;
-    return isMobileOs || isTouchMac;
-  }
-
   function isVideoFile(file) {
     return Boolean(file?.type?.startsWith("video/"));
   }
@@ -202,10 +211,6 @@
     }
     const [file] = files;
     if (isVideoFile(file)) {
-      if (isMobileVideoUploadDevice()) {
-        window.alert("O upload de vídeos pode ser feito apenas através de um PC/Mac.");
-        return false;
-      }
       return true;
     }
     if (!isImageFile(file)) {
@@ -215,8 +220,101 @@
     return true;
   }
 
+  function getListingCurrency() {
+    return state.listingCurrency || "BRL";
+  }
+
+  function formatListingPrice(value, currency = getListingCurrency()) {
+    const normalized = String(value || "").replace(/\./g, "").replace(",", ".");
+    const number = Number(normalized);
+    if (!Number.isFinite(number) || number < 0) return "";
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency,
+    }).format(number);
+  }
+
+  function createListingDraftItem(overrides = {}) {
+    const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return {
+      id,
+      name: "",
+      price: "",
+      file: null,
+      mediaItem: null,
+      previewUrl: "",
+      previewObjectUrl: false,
+      ...overrides,
+    };
+  }
+
+  function revokeListingPreview(item) {
+    if (item?.previewUrl && item.previewObjectUrl) URL.revokeObjectURL(item.previewUrl);
+  }
+
+  function ensureListingDraftItems() {
+    if (!state.listingItemDrafts.length) {
+      state.listingItemDrafts = [createListingDraftItem()];
+    }
+  }
+
+  function syncListingDraftsFromDom() {
+    if (!els.listingItems) return;
+    const byId = new Map(state.listingItemDrafts.map((item) => [String(item.id), item]));
+    const rows = Array.from(els.listingItems.querySelectorAll("[data-listing-item-row]"));
+    if (!rows.length) return;
+    state.listingItemDrafts = rows.map((row) => {
+      const id = row.dataset.listingItemId || "";
+      const previous = byId.get(id) || createListingDraftItem({ id });
+      return {
+        ...previous,
+        name: row.querySelector("[data-listing-item-name]")?.value?.trim() || "",
+        price: row.querySelector("[data-listing-item-price]")?.value?.trim() || "",
+      };
+    });
+  }
+
+  function getListingDraftItems() {
+    syncListingDraftsFromDom();
+    ensureListingDraftItems();
+    return state.listingItemDrafts.map((item) => ({
+      ...item,
+      priceLabel: formatListingPrice(item.price),
+    }));
+  }
+
+  function getListingItemsFromComposer() {
+    return getListingDraftItems()
+      .filter((item) => item.name || item.price || item.file);
+  }
+
+  function buildListingBody(text, items) {
+    const itemLines = items
+      .filter((item) => item.name || item.priceLabel)
+      .map((item) => {
+        if (item.name && item.priceLabel) return `${item.name} - ${item.priceLabel}`;
+        return item.name || item.priceLabel;
+      });
+    return [text, itemLines.length ? `Itens:\n${itemLines.join("\n")}` : ""]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  function validateListingItems(items) {
+    if (!items.length) {
+      window.alert("Adicione pelo menos um item ao anúncio.");
+      return false;
+    }
+    const incomplete = items.some((item) => !item.name || !item.priceLabel);
+    if (incomplete) {
+      window.alert("Cada item do anúncio precisa ter nome e preço.");
+      return false;
+    }
+    return true;
+  }
+
   function getPostTypeFromComposer(files) {
-    if (els.composerListing?.checked) return "listing";
+    if (state.composerMode === "listing") return "listing";
     const [file] = files;
     if (isVideoFile(file)) return "video";
     return "post";
@@ -805,11 +903,20 @@
   function setPublishing(isPublishing, label = "Publicar") {
     if (els.publishPost) {
       els.publishPost.disabled = isPublishing || !state.session?.user || !state.game;
-      els.publishPost.textContent = isPublishing ? label : "Publicar";
+      els.publishPost.textContent = isPublishing
+        ? label
+        : (state.composerMode === "listing" ? "Publicar anúncio" : "Publicar");
     }
     if (els.composerText) els.composerText.disabled = isPublishing || !state.session?.user || !state.game;
     if (els.composerFile) els.composerFile.disabled = isPublishing || !state.session?.user || !state.game;
-    if (els.composerListing) els.composerListing.disabled = isPublishing || !state.session?.user || !state.game;
+    els.composerModeButtons.forEach((button) => {
+      button.disabled = isPublishing || !state.session?.user || !state.game;
+    });
+    if (els.listingCurrency) els.listingCurrency.disabled = isPublishing || !state.session?.user || !state.game;
+    if (els.listingItemAdd) els.listingItemAdd.disabled = isPublishing || !state.session?.user || !state.game;
+    els.listingItems?.querySelectorAll("input, button").forEach((field) => {
+      field.disabled = isPublishing || !state.session?.user || !state.game;
+    });
   }
 
   async function uploadComposerMedia(file, target) {
@@ -891,8 +998,35 @@
     return uploadedItems;
   }
 
+  async function buildListingMediaItemsForSave(items) {
+    const uploadedItems = [];
+    let uploadIndex = 0;
+    const newFilesCount = items.filter((item) => item.file).length;
+    for (const [position, item] of items.entries()) {
+      const baseItem = {
+        itemName: item.name,
+        priceLabel: item.priceLabel || formatListingPrice(item.price),
+        position,
+      };
+      if (!item.file) {
+        uploadedItems.push(baseItem);
+        continue;
+      }
+      uploadIndex += 1;
+      setPublishing(true, newFilesCount > 1 ? `Enviando ${uploadIndex}/${newFilesCount}...` : "Enviando...");
+      const uploaded = await uploadComposerMedia(item.file, "listing");
+      uploadedItems.push({
+        ...baseItem,
+        url: uploaded.url,
+        key: uploaded.key,
+        mediaType: uploaded.mediaType,
+      });
+    }
+    return uploadedItems;
+  }
+
   async function createGamePost({ type, text, uploadedMediaItems }) {
-    const primaryMedia = uploadedMediaItems[0] || null;
+    const primaryMedia = uploadedMediaItems.find((item) => item?.url && item?.key) || null;
     const response = await fetch("/api/posts/create", {
       method: "POST",
       headers: {
@@ -944,7 +1078,7 @@
   }
 
   function addComposerSelectedFiles(files) {
-    if (!els.composerListing?.checked) {
+    if (state.composerMode !== "listing") {
       state.composerSelectedFiles = files.slice(0, 1);
       return;
     }
@@ -991,21 +1125,84 @@
     }
   }
 
+  function renderListingItems(nextItems = null) {
+    if (!els.listingItems) return;
+    if (Array.isArray(nextItems)) {
+      state.listingItemDrafts = nextItems;
+    } else {
+      syncListingDraftsFromDom();
+    }
+    ensureListingDraftItems();
+    const items = state.listingItemDrafts;
+    const currencySymbol = LISTING_CURRENCY_SYMBOLS[getListingCurrency()] || getListingCurrency();
+    els.listingItems.innerHTML = items.map((item) => `
+      <div class="listing-item-row" data-listing-item-row data-listing-item-id="${escapeHtml(item.id)}">
+        <label>
+          <span>Item</span>
+          <input type="text" data-listing-item-name maxlength="60" placeholder="Nome do item" value="${escapeHtml(item.name)}">
+        </label>
+        <label>
+          <span>Preço</span>
+          <div class="price-input">
+            <span>${escapeHtml(currencySymbol)}</span>
+            <input type="number" data-listing-item-price min="0" step="0.01" inputmode="decimal" placeholder="0,00" value="${escapeHtml(item.price)}">
+          </div>
+        </label>
+        <label class="listing-item-image-field">
+          <span>Imagem do item</span>
+          <input type="file" data-listing-item-image accept="image/jpeg,image/png,image/webp,image/gif">
+          <div class="listing-item-image-preview${item.previewUrl ? " has-image" : ""}">
+            ${item.previewUrl ? `<img src="${escapeHtml(item.previewUrl)}" alt="">` : `<span>Selecionar imagem</span>`}
+          </div>
+        </label>
+        <button class="ghost-icon listing-item-remove" type="button" data-listing-item-remove aria-label="Remover item" ${items.length === 1 ? "disabled" : ""}>x</button>
+      </div>
+    `).join("");
+  }
+
+  function resetListingItems() {
+    state.listingItemDrafts.forEach(revokeListingPreview);
+    state.listingItemDrafts = [createListingDraftItem()];
+    renderListingItems(state.listingItemDrafts);
+  }
+
+  function setComposerMode(mode) {
+    state.composerMode = mode === "listing" ? "listing" : "post";
+    els.composer?.classList.toggle("is-listing-mode", state.composerMode === "listing");
+    els.composerModeButtons.forEach((button) => {
+      const active = button.dataset.gameComposerMode === state.composerMode;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    syncComposerListingState();
+  }
+
   function syncComposerListingState() {
-    const isListing = Boolean(els.composerListing?.checked);
-    if (els.composerListingHelper) els.composerListingHelper.hidden = !isListing;
+    const isListing = state.composerMode === "listing";
+    if (els.listingComposerFields) els.listingComposerFields.hidden = !isListing;
+    if (els.composerListingHelper) {
+      els.composerListingHelper.textContent = "Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.";
+    }
+    if (els.composerText) {
+      els.composerText.placeholder = isListing
+        ? "Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes."
+        : "Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser.";
+    }
+    if (isListing && els.listingItems && !els.listingItems.children.length) {
+      renderListingItems();
+    }
     if (els.composerFile) {
       els.composerFile.multiple = isListing;
       els.composerFile.accept = isListing
         ? "image/jpeg,image/png,image/webp,image/gif"
         : "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
       const files = getComposerFiles();
-      const invalidListingSelection = isListing && (
-        files.length > 15 || files.some((file) => !isImageFile(file))
-      );
-      if ((!isListing && state.composerSelectedFiles.length) || invalidListingSelection) {
+      if (isListing && files.length) {
         clearComposerFile();
       }
+    }
+    if (els.publishPost && !els.publishPost.disabled) {
+      els.publishPost.textContent = isListing ? "Publicar anúncio" : "Publicar";
     }
   }
 
@@ -1017,32 +1214,48 @@
     if (!state.game) return;
 
     const text = els.composerText?.value?.trim() || "";
-    const files = getComposerFiles();
-    if (!text && !files.length) {
+    const type = getPostTypeFromComposer(getComposerFiles());
+    const listingItems = type === "listing" ? getListingItemsFromComposer() : [];
+    const files = type === "listing"
+      ? listingItems.map((item) => item.file).filter(Boolean)
+      : getComposerFiles();
+    const finalText = type === "listing" ? buildListingBody(text, listingItems) : text;
+
+    if (type === "listing" && !validateListingItems(listingItems)) return;
+
+    if (!finalText && !files.length) {
       els.composerText?.focus();
       return;
     }
 
-    const type = getPostTypeFromComposer(files);
     if (!validateComposerFiles(files, type)) return;
 
     try {
       setComposerFeedback("");
-      setPublishing(true, files.length ? "Enviando..." : "Publicando...");
-      const uploadTarget = files.length ? type : "post";
-      const uploadedMediaItems = await uploadComposerMediaItems(files, uploadTarget);
+      let uploadedMediaItems = [];
+      if (type === "listing") {
+        uploadedMediaItems = await buildListingMediaItemsForSave(listingItems);
+      } else {
+        setPublishing(true, files.length ? "Enviando..." : "Publicando...");
+        const uploadTarget = files.length ? type : "post";
+        uploadedMediaItems = await uploadComposerMediaItems(files, uploadTarget);
+      }
       setPublishing(true, "Publicando...");
-      await createGamePost({ type, text, uploadedMediaItems });
+      await createGamePost({ type, text: finalText, uploadedMediaItems });
       if (els.composerText) els.composerText.value = "";
-      if (els.composerListing) els.composerListing.checked = false;
+      if (type === "listing") resetListingItems();
       clearComposerFile();
-      syncComposerListingState();
+      setComposerMode("post");
       await loadGame();
       setComposerFeedback("Publicado.", "success");
     } catch (error) {
       console.warn("Não foi possível publicar no game.", error);
       if (error.code === "account_not_verified") {
-        setComposerFeedback("Verifique sua conta para publicar.", "error");
+        setComposerFeedback("Verifique sua conta no Discord para publicar.", "error");
+        return;
+      }
+      if (error.code === "video_upload_requires_discord_verification") {
+        setComposerFeedback("Verifique sua conta pelo bot do Gimerr no Discord para enviar vídeos.", "error");
         return;
       }
       setComposerFeedback(error.message || "Não foi possível publicar.", "error");
@@ -1109,7 +1322,7 @@
 
   async function deletePost(postId) {
     if (!state.session?.access_token) return;
-    const confirmed = window.confirm("Apagar este post? Essa ação também remove a mídia enviada.");
+    const confirmed = window.confirm("Apagar este post? Essa ação é irreversível.");
     if (!confirmed) return;
 
     const response = await fetch("/api/posts/delete", {
@@ -1374,8 +1587,58 @@
   els.publishPost?.addEventListener("click", publishGamePost);
   els.composerFile?.addEventListener("change", renderComposerFile);
   els.composerClearFile?.addEventListener("click", clearComposerFile);
-  els.composerListing?.addEventListener("change", syncComposerListingState);
-  syncComposerListingState();
+  els.composerModeButtons.forEach((button) => {
+    button.addEventListener("click", () => setComposerMode(button.dataset.gameComposerMode));
+  });
+  els.listingCurrency?.addEventListener("change", (event) => {
+    syncListingDraftsFromDom();
+    state.listingCurrency = event.target.value || "BRL";
+    renderListingItems(state.listingItemDrafts);
+  });
+  els.listingItemAdd?.addEventListener("click", () => {
+    const items = getListingDraftItems();
+    if (items.length >= 15) return;
+    items.push(createListingDraftItem());
+    renderListingItems(items);
+  });
+  els.listingItems?.addEventListener("click", (event) => {
+    const removeButton = event.target instanceof Element
+      ? event.target.closest("[data-listing-item-remove]")
+      : null;
+    if (!removeButton) return;
+    const row = removeButton.closest("[data-listing-item-row]");
+    if (!row || state.listingItemDrafts.length <= 1) return;
+    syncListingDraftsFromDom();
+    const removedId = row.dataset.listingItemId || "";
+    const removed = state.listingItemDrafts.find((item) => String(item.id) === String(removedId));
+    revokeListingPreview(removed);
+    state.listingItemDrafts = state.listingItemDrafts.filter((item) => String(item.id) !== String(removedId));
+    renderListingItems(state.listingItemDrafts);
+  });
+  els.listingItems?.addEventListener("change", (event) => {
+    const input = event.target instanceof Element
+      ? event.target.closest("[data-listing-item-image]")
+      : null;
+    if (!input) return;
+    const row = input.closest("[data-listing-item-row]");
+    const file = input.files?.[0] || null;
+    if (!row || !file) return;
+    if (!isImageFile(file)) {
+      window.alert("Selecione uma imagem JPG, PNG, WebP ou GIF.");
+      input.value = "";
+      return;
+    }
+    syncListingDraftsFromDom();
+    const item = state.listingItemDrafts.find((draft) => String(draft.id) === String(row.dataset.listingItemId || ""));
+    if (!item) return;
+    revokeListingPreview(item);
+    item.file = file;
+    item.mediaItem = null;
+    item.previewUrl = URL.createObjectURL(file);
+    item.previewObjectUrl = true;
+    renderListingItems(state.listingItemDrafts);
+  });
+  setComposerMode("post");
   els.filterButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.filter = button.dataset.gameFeedFilter;

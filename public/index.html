@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#111827">
-  <meta http-equiv="Delegate-CH" content="Sec-CH-UA https://s.magsrv.com; Sec-CH-UA-Mobile https://s.magsrv.com; Sec-CH-UA-Arch https://s.magsrv.com; Sec-CH-UA-Model https://s.magsrv.com; Sec-CH-UA-Platform https://s.magsrv.com; Sec-CH-UA-Platform-Version https://s.magsrv.com; Sec-CH-UA-Bitness https://s.magsrv.com; Sec-CH-UA-Full-Version-List https://s.magsrv.com; Sec-CH-UA-Full-Version https://s.magsrv.com;">
   <link rel="icon" type="image/png" href="/assets/favicon.png">
   <title>Gimerr</title>
   <link rel="stylesheet" href="./styles.css">
@@ -126,13 +125,16 @@
       </section>
 
       <aside class="right-rail" aria-label="Informações">
-        <section class="panel ad-rail-panel" id="index-ad-rail" data-exoclick-rail>
+        <section class="panel ad-rail-panel" id="index-ad-rail" data-adcash-rail>
           <div class="section-head">
             <h2>Publicidade</h2>
             <span>Gimerr</span>
           </div>
-          <div class="ad-provider-slot" id="index-ad-provider-slot" aria-label="Publicidade externa"></div>
-          <div class="ad-fallback-grid" id="index-ad-fallback-grid" aria-label="Sugestões Gimerr">
+          <div class="ad-provider-slot is-loading" id="index-ad-provider-slot" data-ad-slot aria-label="Publicidade AdCash" aria-busy="true">
+            <span class="ad-loader-line ad-loader-line-wide"></span>
+            <span class="ad-loader-line"></span>
+          </div>
+          <div class="ad-fallback-grid" id="index-ad-fallback-grid" aria-label="Sugestões Gimerr" hidden>
             <a class="ad-fallback-card" href="./game.html">
               <strong>Descubra novos games</strong>
               <span>Encontre comunidades e conteúdos recentes.</span>
@@ -164,9 +166,6 @@
       <div class="modal-head">
         <h2 id="verification-title">Verifique sua conta para publicar</h2>
       </div>
-      <p class="verification-copy">
-        Para proteger a comunidade contra spam, apenas contas verificadas pelo Discord podem publicar no Gimerr.
-      </p>
       <div class="verification-steps" id="verification-steps"></div>
       <p class="field-feedback" id="verification-feedback" role="status"></p>
       <div class="modal-actions">
@@ -188,7 +187,7 @@
   <script src="./user-search.js" defer></script>
   <script src="./navbar.js" defer></script>
   <script src="./video-player.js" defer></script>
-  <script src="./exoclick-ads.js" defer></script>
+  <script src="./adcash-ads.js" defer></script>
   <script src="./media-lightbox.js" defer></script>
   <script src="./app.js" defer></script>
 </body>

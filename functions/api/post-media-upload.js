@@ -1,4 +1,5 @@
 import { hasR2Bucket, jsonResponse, putR2Object, requireAuthUser } from "../_shared/auth.js";
+import { requireDiscordBotVerifiedForVideoUpload } from "../_shared/verification.js";
 
 const TARGETS = {
   post: {
@@ -50,6 +51,11 @@ export async function onRequestPost({ request, env }) {
 
     if (!config) {
       return jsonResponse({ error: "Tipo de publicação inválido." }, { status: 400 });
+    }
+
+    if (target === "video") {
+      const verification = await requireDiscordBotVerifiedForVideoUpload(env, auth.user.id);
+      if (verification.error) return verification.error;
     }
 
     if (!(file instanceof File)) {

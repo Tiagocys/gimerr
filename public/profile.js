@@ -634,13 +634,13 @@ function renderPublicInfo() {
     : "";
   const whatsappItem = profileInfo.phoneVisibility === "public" && profileInfo.phoneContactWhatsapp && phoneDigits
     ? `<a class="info-pill contact-pill whatsapp-contact-pill" href="https://wa.me/${escapeHtml(phoneDigits)}" target="_blank" rel="noopener">
-        <img src="./assets/wtsp.png" alt="">
+        <img src="./assets/whatsapp.svg" alt="">
         WhatsApp
       </a>`
     : "";
   const telegramItem = profileInfo.phoneVisibility === "public" && profileInfo.phoneContactTelegram && phoneDigits
     ? `<a class="info-pill contact-pill telegram-contact-button" href="tg://resolve?phone=${escapeHtml(phoneDigits)}">
-        <img src="./assets/telegram.webp" alt="">
+        <img src="./assets/telegram.svg" alt="">
         Telegram
       </a>`
     : "";
@@ -1117,7 +1117,7 @@ async function reportPost(postId) {
 
 async function deletePost(postId) {
   if (!state.session?.access_token) return;
-  const confirmed = window.confirm("Apagar este post? Essa ação também remove a mídia enviada.");
+  const confirmed = window.confirm("Apagar este post? Essa ação é irreversível.");
   if (!confirmed) return;
 
   const response = await fetch("/api/posts/delete", {

@@ -35,16 +35,18 @@ function normalizeMediaItems(items) {
     const key = cleanText(item?.key, 500);
     const mediaType = cleanText(item?.mediaType, 120);
     const itemName = cleanText(item?.itemName, 120);
+    const priceLabel = cleanText(item?.priceLabel, 80);
     const position = Number.parseInt(String(item?.position ?? ""), 10);
-    if (!url || !key || seen.has(key)) continue;
-    if (!key.startsWith("market/")) continue;
-    if (!mediaType.startsWith("image/")) continue;
-    seen.add(key);
+    const hasMedia = Boolean(url && key);
+    if (!hasMedia && !itemName && !priceLabel) continue;
+    if (hasMedia && seen.has(key)) continue;
+    if (hasMedia && !key.startsWith("market/")) continue;
+    if (hasMedia && !mediaType.startsWith("image/")) continue;
+    if (hasMedia) seen.add(key);
     normalized.push({
-      url,
-      key,
-      mediaType,
+      ...(hasMedia ? { url, key, mediaType } : {}),
       ...(itemName ? { itemName } : {}),
+      ...(priceLabel ? { priceLabel } : {}),
       ...(Number.isFinite(position) ? { position } : {}),
     });
     if (normalized.length >= MAX_LISTING_MEDIA_ITEMS) break;
@@ -113,7 +115,7 @@ export async function onRequestPost({ request, env }) {
     }
 
     const mediaItems = normalizeMediaItems(payload.mediaItems);
-    const primaryMedia = mediaItems[0] || null;
+    const primaryMedia = mediaItems.find((item) => item?.url && item?.key) || null;
     const updated = await updatePost(env, postId, {
       body,
       media_url: primaryMedia?.url || null,

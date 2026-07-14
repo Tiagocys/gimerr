@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#111827">
-  <meta http-equiv="Delegate-CH" content="Sec-CH-UA https://s.magsrv.com; Sec-CH-UA-Mobile https://s.magsrv.com; Sec-CH-UA-Arch https://s.magsrv.com; Sec-CH-UA-Model https://s.magsrv.com; Sec-CH-UA-Platform https://s.magsrv.com; Sec-CH-UA-Platform-Version https://s.magsrv.com; Sec-CH-UA-Bitness https://s.magsrv.com; Sec-CH-UA-Full-Version-List https://s.magsrv.com; Sec-CH-UA-Full-Version https://s.magsrv.com;">
   <link rel="icon" type="image/png" href="/assets/favicon.png">
   <title>Jogo | Gimerr</title>
   <link rel="stylesheet" href="./styles.css">
@@ -76,7 +75,27 @@
           </div>
 
           <section class="composer game-composer" id="game-composer" aria-label="Criar publicação no jogo">
-            <textarea id="game-composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou publique um anúncio."></textarea>
+            <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação">
+              <button class="tab-button is-active" type="button" data-game-composer-mode="post">Post</button>
+              <button class="tab-button" type="button" data-game-composer-mode="listing">Anúncio</button>
+            </div>
+            <textarea id="game-composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser."></textarea>
+            <div class="listing-composer-fields" id="game-listing-composer-fields" hidden>
+              <p class="composer-listing-helper" id="game-composer-listing-helper">Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.</p>
+              <label class="listing-currency-field" for="game-listing-currency">
+                <span>Moeda dos itens</span>
+                <select id="game-listing-currency">
+                  <option value="BRL">BRL - Real brasileiro</option>
+                  <option value="USD">USD - Dólar americano</option>
+                  <option value="EUR">EUR - Euro</option>
+                  <option value="JPY">JPY - Iene japonês</option>
+                  <option value="GBP">GBP - Libra esterlina</option>
+                  <option value="CNY">CNY - Yuan chinês</option>
+                </select>
+              </label>
+              <div class="listing-items" id="game-listing-items"></div>
+              <button class="text-button listing-item-add" id="game-listing-item-add" type="button">Adicionar item</button>
+            </div>
             <div class="composer-media" id="game-composer-media" hidden>
               <div class="composer-media-summary">
                 <span id="game-composer-file-name"></span>
@@ -85,10 +104,7 @@
               <button class="text-button" id="game-composer-clear-file" type="button">Remover</button>
             </div>
             <div class="composer-footer">
-              <label class="checkbox-pill" for="game-composer-listing">
-                <input id="game-composer-listing" type="checkbox">
-                <span>Anúncio</span>
-              </label>
+              <span></span>
               <div class="composer-actions">
                 <label class="text-button upload-button" for="game-composer-file">
                   <svg aria-hidden="true" viewBox="0 0 24 24">
@@ -100,9 +116,6 @@
                 <button class="primary-button" id="game-publish-post" type="button">Publicar</button>
               </div>
             </div>
-            <p class="composer-listing-helper" id="game-composer-listing-helper" hidden>
-              Anúncios permitem até 15 imagens. Selecione uma ou várias imagens na mesma janela de envio.
-            </p>
             <p class="field-feedback" id="game-composer-feedback" role="status"></p>
           </section>
 

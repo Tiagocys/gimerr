@@ -1,5 +1,6 @@
 import { deleteR2Object, getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
+import { requireDiscordBotVerifiedForVideoUpload } from "../../_shared/verification.js";
 
 const VALID_TYPES = new Set(["post", "video", "listing"]);
 const VALID_MEDIA_PREFIXES = ["posts/", "videos/", "market/"];
@@ -69,17 +70,20 @@ function normalizeMediaItems(items, postType) {
     const key = cleanText(item?.key, 500);
     const mediaType = cleanText(item?.mediaType, 120);
     const itemName = cleanText(item?.itemName, 120);
+    const priceLabel = cleanText(item?.priceLabel, 80);
     const position = Number.parseInt(String(item?.position ?? ""), 10);
-    if (!url || !key || seen.has(key)) continue;
-    if (!isValidMediaKeyForType(postType, key)) continue;
-    if (postType === "listing" && !mediaType.startsWith("image/")) continue;
+    const hasMedia = Boolean(url && key);
+    if (!hasMedia && postType !== "listing") continue;
+    if (!hasMedia && !itemName && !priceLabel) continue;
+    if (hasMedia && seen.has(key)) continue;
+    if (hasMedia && !isValidMediaKeyForType(postType, key)) continue;
+    if (hasMedia && postType === "listing" && !mediaType.startsWith("image/")) continue;
     if (postType !== "listing" && normalized.length) continue;
-    seen.add(key);
+    if (hasMedia) seen.add(key);
     normalized.push({
-      url,
-      key,
-      mediaType,
+      ...(hasMedia ? { url, key, mediaType } : {}),
       ...(postType === "listing" && itemName ? { itemName } : {}),
+      ...(postType === "listing" && priceLabel ? { priceLabel } : {}),
       ...(postType === "listing" && Number.isFinite(position) ? { position } : {}),
     });
     if (postType === "listing" && normalized.length >= MAX_LISTING_MEDIA_ITEMS) break;
@@ -221,7 +225,7 @@ export async function onRequestPost({ request, env }) {
     }
 
     let mediaItems = normalizeMediaItems(payload.mediaItems, postType);
-    const primaryMedia = mediaItems[0] || (fallbackMediaUrl && fallbackMediaKey
+    const primaryMedia = mediaItems.find((item) => item?.url && item?.key) || (fallbackMediaUrl && fallbackMediaKey
       ? { url: fallbackMediaUrl, key: fallbackMediaKey, mediaType: fallbackMediaType }
       : null);
     const mediaUrl = primaryMedia?.url || fallbackMediaUrl;
@@ -230,7 +234,7 @@ export async function onRequestPost({ request, env }) {
     if (postType === "listing" && !mediaItems.length && primaryMedia?.mediaType?.startsWith("image/")) {
       mediaItems = [primaryMedia];
     }
-    mediaKeys = mediaItems.length ? mediaItems.map((item) => item.key) : [mediaKey].filter(Boolean);
+    mediaKeys = mediaItems.length ? mediaItems.map((item) => item.key).filter(Boolean) : [mediaKey].filter(Boolean);
 
     if (!gameId) {
       return jsonResponse({ error: "Selecione um game." }, { status: 400 });
@@ -242,6 +246,14 @@ export async function onRequestPost({ request, env }) {
 
     if (!isValidMediaKeyForType(postType, mediaKey)) {
       return jsonResponse({ error: "Mídia incompatível com o tipo de publicação." }, { status: 400 });
+    }
+
+    if (postType === "video") {
+      const verification = await requireDiscordBotVerifiedForVideoUpload(env, auth.user.id);
+      if (verification.error) {
+        await Promise.allSettled([...new Set(mediaKeys)].map((key) => deleteR2Object(env, key)));
+        return verification.error;
+      }
     }
 
     const follows = await userFollowsGame(env, auth.user.id, gameId);

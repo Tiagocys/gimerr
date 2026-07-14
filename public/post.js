@@ -402,7 +402,7 @@
 
   async function deletePost(postId) {
     if (!state.session?.access_token) return;
-    const confirmed = window.confirm("Apagar este post? Essa ação também remove a mídia enviada.");
+    const confirmed = window.confirm("Apagar este post? Essa ação é irreversível.");
     if (!confirmed) return;
 
     const response = await fetch("/api/posts/delete", {

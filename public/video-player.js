@@ -1,7 +1,7 @@
 (function initGimerrVideoPlayer() {
   const FLUID_PLAYER_SRC = "https://cdn.fluidplayer.com/v3/current/fluidplayer.min.js";
-  const EXOCLICK_VAST_TAG = "https://s.magsrv.com/v1/vast.php?idz=5971664";
   const VIDEO_AD_HOSTS = new Set(["gimerr.com", "www.gimerr.com", "gimerr.pages.dev"]);
+  let adsConfigPromise = null;
   let fluidPlayerPromise = null;
   let fluidPlayerCounter = 0;
   let viewerToken = "";
@@ -9,6 +9,20 @@
   function shouldUseVideoAds() {
     const host = window.location.hostname;
     return VIDEO_AD_HOSTS.has(host) || host.endsWith(".gimerr.pages.dev");
+  }
+
+  async function getAdsConfig() {
+    if (!adsConfigPromise) {
+      adsConfigPromise = fetch("/api/ads-config", {
+        headers: { accept: "application/json" },
+      })
+        .then((response) => response.ok ? response.json() : {})
+        .catch((error) => {
+          console.warn("Não foi possível carregar configuração de anúncios.", error);
+          return {};
+        });
+    }
+    return adsConfigPromise;
   }
 
   function formatVideoViewCount(value) {
@@ -113,7 +127,28 @@
     return fluidPlayerPromise;
   }
 
-  function getFluidOptions() {
+  function normalizeVastTag(value) {
+    const tag = String(value || "").trim();
+    if (!tag) return "";
+    try {
+      const url = new URL(tag, window.location.origin);
+      url.searchParams.set("cb", `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+      return url.toString();
+    } catch {
+      return tag;
+    }
+  }
+
+  function getVideoAdList(config) {
+    return [normalizeVastTag(config?.video?.adcashVastTag)]
+      .filter(Boolean)
+      .map((vastTag) => ({
+        roll: "preRoll",
+        vastTag,
+      }));
+  }
+
+  function getFluidOptions(config) {
     const options = {
       layoutControls: {
         fillToContainer: true,
@@ -124,20 +159,17 @@
       },
     };
 
-    if (shouldUseVideoAds()) {
+    const adList = shouldUseVideoAds() ? getVideoAdList(config) : [];
+    if (adList.length) {
       options.vastOptions = {
-        adList: [
-          {
-            roll: "preRoll",
-            vastTag: EXOCLICK_VAST_TAG,
-          },
-        ],
+        adList,
         skipButtonCaption: "Pular anúncio em [seconds]",
         skipButtonClickCaption: "Pular anúncio",
         adText: null,
         adCTAText: false,
         vastTimeout: 4500,
         maxAllowedVastTagRedirects: 3,
+        playMainVideoWhenVastFails: true,
         vastAdvanced: {
           vastLoadedCallback: function vastLoadedCallback() {},
           noVastVideoCallback: function noVastVideoCallback() {},
@@ -160,9 +192,12 @@
     }
 
     try {
-      const fluidPlayer = await loadFluidPlayer();
+      const [fluidPlayer, adsConfig] = await Promise.all([
+        loadFluidPlayer(),
+        getAdsConfig(),
+      ]);
       if (!fluidPlayer || !video.isConnected) return;
-      video._gimerrFluidPlayer = fluidPlayer(video, getFluidOptions());
+      video._gimerrFluidPlayer = fluidPlayer(video, getFluidOptions(adsConfig));
       video.dataset.fluidPlayerState = "ready";
     } catch (error) {
       video.dataset.fluidPlayerState = "fallback";
@@ -219,10 +254,35 @@
     video.play().catch(() => {});
   }
 
+  function stopVideo(video) {
+    if (!video) return;
+    try {
+      video.pause();
+      video.currentTime = 0;
+    } catch {}
+
+    const player = video._gimerrFluidPlayer;
+    if (!player) return;
+    try {
+      if (typeof player.pause === "function") player.pause();
+      if (typeof player.destroy === "function") player.destroy();
+      if (typeof player.destruct === "function") player.destruct();
+      if (typeof player.dispose === "function") player.dispose();
+    } catch {}
+    delete video._gimerrFluidPlayer;
+    delete video.dataset.fluidPlayerState;
+  }
+
+  function stopAll(root = document) {
+    const scope = root instanceof Element || root instanceof Document ? root : document;
+    scope.querySelectorAll("video[data-fluid-video]").forEach(stopVideo);
+  }
+
   window.GimerrVideoPlayer = {
     prepare,
     initializeVideo,
     loadVideoFromPoster,
+    stopAll,
   };
 
   document.addEventListener("pointerdown", (event) => {

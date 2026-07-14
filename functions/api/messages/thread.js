@@ -1,8 +1,24 @@
 import { jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { cleanUuid, fetchRows, inFilter, markConversationMessageNotificationsRead, requireConversationParticipant, toProfile, touchConversationRead } from "../../_shared/messages.js";
 
-function toPublicMessage(row, profiles, viewerId) {
+function getReadByOthersAt(participants, viewerId) {
+  return (participants || [])
+    .filter((participant) => participant.profile_id !== viewerId && participant.last_read_at)
+    .map((participant) => new Date(participant.last_read_at))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime())[0]
+    ?.toISOString() || "";
+}
+
+function toPublicMessage(row, profiles, viewerId, readByOthersAt) {
   const author = toProfile(profiles.get(row.sender_id));
+  const readDate = readByOthersAt ? new Date(readByOthersAt) : null;
+  const createdAt = new Date(row.created_at);
+  const readByOthers = row.sender_id === viewerId
+    && readDate
+    && !Number.isNaN(readDate.getTime())
+    && !Number.isNaN(createdAt.getTime())
+    && readDate >= createdAt;
   return {
     id: row.id,
     conversationId: row.conversation_id,
@@ -11,6 +27,7 @@ function toPublicMessage(row, profiles, viewerId) {
     mediaType: row.media_type || "",
     createdAt: row.created_at,
     isOwn: row.sender_id === viewerId,
+    readByOthers,
     author,
   };
 }
@@ -55,12 +72,15 @@ export async function onRequestGet({ request, env }) {
       markConversationMessageNotificationsRead(env, conversationId, auth.user.id),
     ]);
 
+    const readByOthersAt = getReadByOthersAt(participants, auth.user.id);
+
     return jsonResponse({
+      readByOthersAt,
       participants: participants.map((participant) => ({
         ...participant,
         profile: toProfile(profiles.get(participant.profile_id)),
       })),
-      messages: messages.map((message) => toPublicMessage(message, profiles, auth.user.id)),
+      messages: messages.map((message) => toPublicMessage(message, profiles, auth.user.id, readByOthersAt)),
     });
   } catch (error) {
     console.error("messages thread failed", error);

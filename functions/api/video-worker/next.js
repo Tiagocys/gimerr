@@ -16,19 +16,18 @@ function requireWorker(request, env) {
 
 async function fetchNextUploadedPost(env) {
   const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
-  url.searchParams.set("select", "id,profile_id,media_url,media_key,media_type,original_media_url,original_media_key,created_at");
+  url.searchParams.set("select", "id,profile_id,post_type,media_url,media_key,media_type,original_media_url,original_media_key,created_at");
   url.searchParams.set("status", "eq.active");
-  url.searchParams.set("post_type", "eq.video");
   url.searchParams.set("video_status", "eq.uploaded");
   url.searchParams.set("order", "created_at.asc");
-  url.searchParams.set("limit", "1");
+  url.searchParams.set("limit", "10");
 
   const response = await fetch(url.toString(), {
     headers: getServiceHeaders(env),
   });
   const rows = await response.json().catch(() => []);
   if (!response.ok) throw new Error(rows.message || "Não foi possível buscar fila de vídeo.");
-  return rows[0] || null;
+  return rows.find((row) => row.original_media_key || row.media_key) || null;
 }
 
 async function markProcessing(env, postId) {

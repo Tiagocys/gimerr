@@ -17,6 +17,11 @@ const TARGETS = {
     accept: /^video\/(mp4|webm|quicktime)$/,
     maxBytes: 500 * 1024 * 1024,
   },
+  "video-thumbnail": {
+    folder: "videos/thumbnails",
+    accept: /^image\/(jpeg|png|webp)$/,
+    maxBytes: 2 * 1024 * 1024,
+  },
 };
 
 const MIME_EXTENSIONS = {

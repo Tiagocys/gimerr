@@ -191,8 +191,8 @@ function createVideoThumbnail(input, output) {
     const ffmpeg = spawn("ffmpeg", [
       "-y",
       "-i", input,
+      "-vf", "select=eq(n\\,0),scale=w='min(640,iw)':h=-2",
       "-frames:v", "1",
-      "-vf", "scale=w='min(640,iw)':h=-2",
       "-q:v", "8",
       output,
     ], { stdio: ["ignore", "ignore", "pipe"] });

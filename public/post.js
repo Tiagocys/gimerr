@@ -364,8 +364,10 @@
       : "Veja este post no Gimerr";
     const url = window.location.href;
 
-    if (navigator.share) {
-      await navigator.share({
+    if (window.GimerrShare?.openPostShare) {
+      await window.GimerrShare.openPostShare({
+        postId: post?.id || new URLSearchParams(window.location.search).get("id") || "",
+        post,
         title,
         text: `Publicado em ${post?.game?.name || "Gimerr"}`,
         url,

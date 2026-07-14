@@ -7,6 +7,8 @@
     GBP: "£",
     CNY: "¥",
   };
+  const LISTING_VIDEO_MAX_BYTES = 500 * 1024 * 1024;
+  const LISTING_VIDEO_MAX_SECONDS = 180;
 
   const state = {
     session: null,
@@ -17,7 +19,7 @@
     followerCount: 0,
     following: false,
     feed: [],
-    filter: "all",
+    filter: "listing",
     activeCommentPostId: "",
     activeCommentsPostId: "",
     commentSubmittingPostId: "",
@@ -25,10 +27,10 @@
     commentsLoadingPostId: "",
     commentsByPost: {},
     commentsErrorByPost: {},
-    composerMode: "post",
+    composerMode: "listing",
     composerPreviewUrls: [],
     composerSelectedFiles: [],
-    listingCurrency: "BRL",
+    listingCurrency: "",
     listingItemDrafts: [],
     commentMention: {
       active: false,
@@ -47,10 +49,14 @@
     description: document.querySelector("#game-description"),
     metaList: document.querySelector("#game-meta-list"),
     followButton: document.querySelector("#game-follow-button"),
+    followersPanel: document.querySelector("#game-followers-panel"),
+    followersPanelClose: document.querySelector("#game-followers-close"),
     followersButton: document.querySelector("#game-followers-button"),
     followersCount: document.querySelector("#game-followers-count"),
     followersSideCount: document.querySelector("#game-followers-side-count"),
+    postsButton: document.querySelector("#game-posts-button"),
     postsCount: document.querySelector("#game-posts-count"),
+    listingsButton: document.querySelector("#game-listings-button"),
     listingsCount: document.querySelector("#game-listings-count"),
     followersList: document.querySelector("#game-followers-list"),
     feedList: document.querySelector("#game-feed-list"),
@@ -59,6 +65,7 @@
     composer: document.querySelector("#game-composer"),
     composerText: document.querySelector("#game-composer-text"),
     composerFile: document.querySelector("#game-composer-file"),
+    composerVideoHelper: document.querySelector("#game-composer-video-helper"),
     composerMedia: document.querySelector("#game-composer-media"),
     composerFileName: document.querySelector("#game-composer-file-name"),
     composerMediaPreviews: document.querySelector("#game-composer-media-previews"),
@@ -195,14 +202,24 @@
   function validateComposerFiles(files, type) {
     if (!files.length) return true;
     if (type === "listing") {
-      if (files.length > 15) {
-        window.alert("Anúncios aceitam até 15 imagens.");
+      if (files.length > 1) {
+        setVideoHelperMessage("Anúncios aceitam apenas 1 vídeo.", "warning");
+        markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
         return false;
       }
-      if (files.some((file) => !isImageFile(file))) {
-        window.alert("Anúncios aceitam apenas imagens JPG, PNG, WebP ou GIF.");
+      const [file] = files;
+      if (!isVideoFile(file)) {
+        setVideoHelperMessage("O vídeo do anúncio precisa ser MP4, WebM ou MOV.", "warning");
+        markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
         return false;
       }
+      if (file.size > LISTING_VIDEO_MAX_BYTES) {
+        setVideoHelperMessage("O vídeo do anúncio pode ter no máximo 500 MB.", "warning");
+        markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+        return false;
+      }
+      setVideoHelperMessage("");
+      clearComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
       return true;
     }
     if (files.length > 1) {
@@ -220,11 +237,62 @@
     return true;
   }
 
+  function validateListingItemImageFiles(files) {
+    if (files.length > 15) {
+      showListingHelperMessage("Anúncios aceitam até 15 imagens de itens.", "warning");
+      return false;
+    }
+    if (files.some((file) => !isImageFile(file))) {
+      showListingHelperMessage("As imagens dos itens precisam ser JPG, PNG, WebP ou GIF.", "warning");
+      return false;
+    }
+    return true;
+  }
+
+  function readVideoDuration(file) {
+    return new Promise((resolve, reject) => {
+      const video = document.createElement("video");
+      const url = URL.createObjectURL(file);
+      video.preload = "metadata";
+      video.onloadedmetadata = () => {
+        URL.revokeObjectURL(url);
+        resolve(Number(video.duration || 0));
+      };
+      video.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Não foi possível ler a duração do vídeo."));
+      };
+      video.src = url;
+    });
+  }
+
+  async function validateListingVideoDuration(files) {
+    const [file] = files;
+    if (!file) return true;
+    let duration = 0;
+    try {
+      duration = await readVideoDuration(file);
+    } catch (_) {
+      setVideoHelperMessage("Não foi possível ler a duração do vídeo. Selecione outro arquivo.", "warning");
+      markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+      return false;
+    }
+    if (!duration || duration > LISTING_VIDEO_MAX_SECONDS) {
+      setVideoHelperMessage("O vídeo do anúncio pode ter no máximo 3 minutos.", "warning");
+      markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+      return false;
+    }
+    setVideoHelperMessage("");
+    clearComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+    return true;
+  }
+
   function getListingCurrency() {
-    return state.listingCurrency || "BRL";
+    return state.listingCurrency || "";
   }
 
   function formatListingPrice(value, currency = getListingCurrency()) {
+    if (!currency) return "";
     const normalized = String(value || "").replace(/\./g, "").replace(",", ".");
     const number = Number(normalized);
     if (!Number.isFinite(number) || number < 0) return "";
@@ -300,17 +368,87 @@
       .join("\n\n");
   }
 
+  function getListingPreviewText(body) {
+    const text = String(body || "");
+    const marker = "\n\nItens:\n";
+    const markerIndex = text.indexOf(marker);
+    const description = markerIndex >= 0 ? text.slice(0, markerIndex).trim() : "";
+    if (description) return truncateText(description, 58);
+    const itemsText = markerIndex >= 0 ? text.slice(markerIndex + marker.length) : text.replace(/^Itens:\n/i, "");
+    const firstLine = itemsText.split("\n").map((line) => line.trim()).filter(Boolean)[0] || "";
+    const firstItemName = firstLine.split(/\s+-\s+/)[0]?.trim() || "";
+    return truncateText(firstItemName, 58);
+  }
+
   function validateListingItems(items) {
+    clearListingItemInvalidHighlights();
     if (!items.length) {
-      window.alert("Adicione pelo menos um item ao anúncio.");
+      showListingHelperMessage("Adicione pelo menos um item com preço.", "warning");
+      markListingItemInvalidFields();
       return false;
     }
     const incomplete = items.some((item) => !item.name || !item.priceLabel);
     if (incomplete) {
-      window.alert("Cada item do anúncio precisa ter nome e preço.");
+      showListingHelperMessage("Cada item do anúncio precisa ter nome e preço.", "warning");
+      markListingItemInvalidFields();
       return false;
     }
     return true;
+  }
+
+  function showListingHelperMessage(message = "", tone = "") {
+    if (!els.composerListingHelper) return;
+    els.composerListingHelper.textContent = message;
+    els.composerListingHelper.hidden = !message;
+    els.composerListingHelper.className = `composer-submit-helper${tone ? ` is-${tone}` : ""}`;
+  }
+
+  function setVideoHelperMessage(message = "", tone = "") {
+    if (!els.composerVideoHelper) return;
+    els.composerVideoHelper.textContent = message;
+    els.composerVideoHelper.hidden = !message;
+    els.composerVideoHelper.className = `composer-step-helper${tone ? ` is-${tone}` : ""}`;
+  }
+
+  function markComposerInvalid(element) {
+    element?.classList?.add("is-composer-invalid");
+  }
+
+  function clearComposerInvalid(element) {
+    element?.classList?.remove("is-composer-invalid");
+  }
+
+  function clearListingItemInvalidHighlights() {
+    els.listingItems?.querySelectorAll(".is-composer-invalid").forEach((element) => {
+      element.classList.remove("is-composer-invalid");
+    });
+  }
+
+  function clearComposerFieldInvalidState(target) {
+    if (!target) return;
+    clearComposerInvalid(target);
+    clearComposerInvalid(target.closest?.(".price-input"));
+  }
+
+  function markListingItemInvalidFields() {
+    const rows = Array.from(els.listingItems?.querySelectorAll("[data-listing-item-row]") || []);
+    rows.forEach((row) => {
+      const nameInput = row.querySelector("[data-listing-item-name]");
+      const priceInput = row.querySelector("[data-listing-item-price]");
+      if (!nameInput?.value?.trim()) markComposerInvalid(nameInput);
+      if (!priceInput?.value?.trim()) markComposerInvalid(priceInput?.closest(".price-input") || priceInput);
+    });
+  }
+
+  function validateListingCurrency() {
+    if (getListingCurrency()) {
+      clearComposerInvalid(els.listingCurrency);
+      return true;
+    }
+    showListingHelperMessage("Selecione uma moeda para o anúncio.", "warning");
+    markComposerInvalid(els.listingCurrency);
+    els.listingCurrency?.focus();
+    return false;
   }
 
   function getPostTypeFromComposer(files) {
@@ -431,6 +569,12 @@
     return new Intl.NumberFormat("pt-BR").format(Number(value || 0));
   }
 
+  function truncateText(value, maxLength = 110) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength).trim()}...`;
+  }
+
   function formatRelativeTime(value) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "agora";
@@ -539,8 +683,10 @@
       ? `Veja este vídeo no Gimerr`
       : `Veja este post no Gimerr`;
 
-    if (navigator.share) {
-      await navigator.share({
+    if (window.GimerrShare?.openPostShare) {
+      await window.GimerrShare.openPostShare({
+        postId,
+        post,
         title,
         text: `Publicado em ${state.game?.name || "Gimerr"}`,
         url,
@@ -643,22 +789,26 @@
 
   function renderPostMedia(post) {
     const items = getPostMediaItems(post);
-    if (!items.length) return "";
-    const [firstItem] = items;
-    if (firstItem.mediaType?.startsWith("video/")) {
-      return renderVideoPoster(post, firstItem);
-    }
-    if (items.length === 1) {
+    const imageItems = items.filter((item) => item.mediaType?.startsWith("image/"));
+    const [firstImage] = imageItems;
+    if (!firstImage?.url) {
       return `
-        <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(firstItem.url)}" ${renderImageLightboxAttrs(post, "Imagem do post")}>
-          <img class="media-frame" src="${escapeHtml(firstItem.url)}" alt="">
+        <div class="listing-preview-button listing-placeholder-card">
+          <span class="listing-placeholder-title">Sem imagens</span>
+        </div>
+      `;
+    }
+    if (imageItems.length === 1) {
+      return `
+        <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(firstImage.url)}" ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
+          <img class="media-frame" src="${escapeHtml(firstImage.url)}" alt="">
         </button>
       `;
     }
     return `
-      <button class="media-zoom-button listing-preview-button" type="button" data-image-src="${escapeHtml(firstItem.url)}" data-image-index="0" ${renderImageGalleryAttrs(items)} ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
-        <img src="${escapeHtml(firstItem.url)}" alt="">
-        <span class="listing-preview-count">+${items.length - 1}</span>
+      <button class="media-zoom-button listing-preview-button" type="button" data-image-src="${escapeHtml(firstImage.url)}" data-image-index="0" ${renderImageGalleryAttrs(imageItems)} ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
+        <img src="${escapeHtml(firstImage.url)}" alt="">
+        <span class="listing-preview-count">+${imageItems.length - 1}</span>
       </button>
     `;
   }
@@ -987,7 +1137,6 @@
     if (!files.length) return [];
     const uploadedItems = [];
     for (let index = 0; index < files.length; index += 1) {
-      setPublishing(true, files.length > 1 ? `Enviando ${index + 1}/${files.length}...` : "Enviando...");
       const uploaded = await uploadComposerMedia(files[index], target);
       uploadedItems.push({
         url: uploaded.url,
@@ -998,7 +1147,7 @@
     return uploadedItems;
   }
 
-  async function buildListingMediaItemsForSave(items) {
+  async function buildListingMediaItemsForSave(items, videoFiles = []) {
     const uploadedItems = [];
     let uploadIndex = 0;
     const newFilesCount = items.filter((item) => item.file).length;
@@ -1013,13 +1162,21 @@
         continue;
       }
       uploadIndex += 1;
-      setPublishing(true, newFilesCount > 1 ? `Enviando ${uploadIndex}/${newFilesCount}...` : "Enviando...");
       const uploaded = await uploadComposerMedia(item.file, "listing");
       uploadedItems.push({
         ...baseItem,
         url: uploaded.url,
         key: uploaded.key,
         mediaType: uploaded.mediaType,
+      });
+    }
+    if (videoFiles.length) {
+      const uploaded = await uploadComposerMedia(videoFiles[0], "video");
+      uploadedItems.push({
+        url: uploaded.url,
+        key: uploaded.key,
+        mediaType: uploaded.mediaType,
+        mediaRole: "listingVideo",
       });
     }
     return uploadedItems;
@@ -1055,13 +1212,17 @@
     return payload.post;
   }
 
-  function clearComposerFile() {
+  function clearComposerFile(options = {}) {
     revokeComposerPreviewUrls();
     state.composerSelectedFiles = [];
     if (els.composerFile) els.composerFile.value = "";
     if (els.composerMedia) els.composerMedia.hidden = true;
     if (els.composerFileName) els.composerFileName.textContent = "";
     if (els.composerMediaPreviews) els.composerMediaPreviews.innerHTML = "";
+    if (!options.preserveVideoHelper) {
+      setVideoHelperMessage("");
+      clearComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+    }
   }
 
   function revokeComposerPreviewUrls() {
@@ -1078,19 +1239,10 @@
   }
 
   function addComposerSelectedFiles(files) {
-    if (state.composerMode !== "listing") {
-      state.composerSelectedFiles = files.slice(0, 1);
-      return;
-    }
-    const bySignature = new Map(state.composerSelectedFiles.map((file) => [getFileSignature(file), file]));
-    files.forEach((file) => {
-      if (bySignature.size >= 15) return;
-      bySignature.set(getFileSignature(file), file);
-    });
-    state.composerSelectedFiles = Array.from(bySignature.values()).slice(0, 15);
+    state.composerSelectedFiles = Array.from(files || []).slice(0, 1);
   }
 
-  function renderComposerFile() {
+  async function renderComposerFile() {
     const selectedFiles = Array.from(els.composerFile?.files || []);
     if (selectedFiles.length) addComposerSelectedFiles(selectedFiles);
     if (els.composerFile) els.composerFile.value = "";
@@ -1102,7 +1254,11 @@
     }
     const type = getPostTypeFromComposer(files);
     if (!validateComposerFiles(files, type)) {
-      clearComposerFile();
+      clearComposerFile({ preserveVideoHelper: true });
+      return;
+    }
+    if (type === "listing" && !await validateListingVideoDuration(files)) {
+      clearComposerFile({ preserveVideoHelper: true });
       return;
     }
     revokeComposerPreviewUrls();
@@ -1134,8 +1290,9 @@
     }
     ensureListingDraftItems();
     const items = state.listingItemDrafts;
-    const currencySymbol = LISTING_CURRENCY_SYMBOLS[getListingCurrency()] || getListingCurrency();
-    els.listingItems.innerHTML = items.map((item) => `
+    const currency = getListingCurrency();
+    const currencySymbol = currency ? (LISTING_CURRENCY_SYMBOLS[currency] || currency) : "Moeda";
+    els.listingItems.innerHTML = items.map((item, index) => `
       <div class="listing-item-row" data-listing-item-row data-listing-item-id="${escapeHtml(item.id)}">
         <label>
           <span>Item</span>
@@ -1149,15 +1306,25 @@
           </div>
         </label>
         <label class="listing-item-image-field">
-          <span>Imagem do item</span>
+          <span>Imagem (opcional)</span>
           <input type="file" data-listing-item-image accept="image/jpeg,image/png,image/webp,image/gif">
           <div class="listing-item-image-preview${item.previewUrl ? " has-image" : ""}">
             ${item.previewUrl ? `<img src="${escapeHtml(item.previewUrl)}" alt="">` : `<span>Selecionar imagem</span>`}
           </div>
         </label>
-        <button class="ghost-icon listing-item-remove" type="button" data-listing-item-remove aria-label="Remover item" ${items.length === 1 ? "disabled" : ""}>x</button>
+        <button class="ghost-icon listing-item-remove" type="button" data-listing-item-remove aria-label="${index === 0 ? "Limpar item" : "Remover item"}">x</button>
       </div>
     `).join("");
+    updateListingItemAddButton(items.length);
+  }
+
+  function updateListingItemAddButton(itemCount = state.listingItemDrafts.length) {
+    if (!els.listingItemAdd) return;
+    const remaining = Math.max(0, 15 - Number(itemCount || 0));
+    els.listingItemAdd.hidden = remaining <= 0;
+    els.listingItemAdd.textContent = remaining === 1
+      ? "Adicione mais 1 item"
+      : `Adicione mais ${remaining} itens`;
   }
 
   function resetListingItems() {
@@ -1166,11 +1333,16 @@
     renderListingItems(state.listingItemDrafts);
   }
 
+  function resetListingCurrency() {
+    state.listingCurrency = "";
+    if (els.listingCurrency) els.listingCurrency.value = "";
+  }
+
   function setComposerMode(mode) {
-    state.composerMode = mode === "listing" ? "listing" : "post";
-    els.composer?.classList.toggle("is-listing-mode", state.composerMode === "listing");
+    state.composerMode = "listing";
+    els.composer?.classList.add("is-listing-mode");
     els.composerModeButtons.forEach((button) => {
-      const active = button.dataset.gameComposerMode === state.composerMode;
+      const active = button.dataset.gameComposerMode === "listing";
       button.classList.toggle("is-active", active);
       button.setAttribute("aria-selected", String(active));
     });
@@ -1178,31 +1350,23 @@
   }
 
   function syncComposerListingState() {
-    const isListing = state.composerMode === "listing";
+    const isListing = true;
     if (els.listingComposerFields) els.listingComposerFields.hidden = !isListing;
     if (els.composerListingHelper) {
-      els.composerListingHelper.textContent = "Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.";
+      showListingHelperMessage();
     }
     if (els.composerText) {
-      els.composerText.placeholder = isListing
-        ? "Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes."
-        : "Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser.";
+      els.composerText.placeholder = "Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes.";
     }
     if (isListing && els.listingItems && !els.listingItems.children.length) {
       renderListingItems();
     }
     if (els.composerFile) {
-      els.composerFile.multiple = isListing;
-      els.composerFile.accept = isListing
-        ? "image/jpeg,image/png,image/webp,image/gif"
-        : "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
-      const files = getComposerFiles();
-      if (isListing && files.length) {
-        clearComposerFile();
-      }
+      els.composerFile.multiple = false;
+      els.composerFile.accept = "video/mp4,video/webm,video/quicktime";
     }
     if (els.publishPost && !els.publishPost.disabled) {
-      els.publishPost.textContent = isListing ? "Publicar anúncio" : "Publicar";
+      els.publishPost.textContent = "Publicar anúncio";
     }
   }
 
@@ -1214,12 +1378,14 @@
     if (!state.game) return;
 
     const text = els.composerText?.value?.trim() || "";
-    const type = getPostTypeFromComposer(getComposerFiles());
+    const type = "listing";
     const listingItems = type === "listing" ? getListingItemsFromComposer() : [];
-    const files = type === "listing"
-      ? listingItems.map((item) => item.file).filter(Boolean)
-      : getComposerFiles();
+    const itemImageFiles = listingItems.map((item) => item.file).filter(Boolean);
+    const videoFiles = getComposerFiles();
+    const files = [...itemImageFiles, ...videoFiles];
     const finalText = type === "listing" ? buildListingBody(text, listingItems) : text;
+
+    if (type === "listing" && !validateListingCurrency()) return;
 
     if (type === "listing" && !validateListingItems(listingItems)) return;
 
@@ -1228,24 +1394,28 @@
       return;
     }
 
-    if (!validateComposerFiles(files, type)) return;
+    if (!validateListingItemImageFiles(itemImageFiles)) return;
+    if (!validateComposerFiles(videoFiles, type)) return;
+    if (!await validateListingVideoDuration(videoFiles)) return;
 
     try {
       setComposerFeedback("");
+      setPublishing(true, "Publicando...");
       let uploadedMediaItems = [];
       if (type === "listing") {
-        uploadedMediaItems = await buildListingMediaItemsForSave(listingItems);
+        uploadedMediaItems = await buildListingMediaItemsForSave(listingItems, videoFiles);
       } else {
-        setPublishing(true, files.length ? "Enviando..." : "Publicando...");
         const uploadTarget = files.length ? type : "post";
         uploadedMediaItems = await uploadComposerMediaItems(files, uploadTarget);
       }
-      setPublishing(true, "Publicando...");
       await createGamePost({ type, text: finalText, uploadedMediaItems });
       if (els.composerText) els.composerText.value = "";
-      if (type === "listing") resetListingItems();
+      if (type === "listing") {
+        resetListingCurrency();
+        resetListingItems();
+      }
       clearComposerFile();
-      setComposerMode("post");
+      setComposerMode("listing");
       await loadGame();
       setComposerFeedback("Publicado.", "success");
     } catch (error) {
@@ -1322,7 +1492,7 @@
 
   async function deletePost(postId) {
     if (!state.session?.access_token) return;
-    const confirmed = window.confirm("Apagar este post? Essa ação é irreversível.");
+    const confirmed = window.confirm("Apagar este anúncio? Essa ação é irreversível.");
     if (!confirmed) return;
 
     const response = await fetch("/api/posts/delete", {
@@ -1335,7 +1505,7 @@
       body: JSON.stringify({ postId }),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "Não foi possível apagar este post.");
+    if (!response.ok) throw new Error(payload.error || "Não foi possível apagar este anúncio.");
 
     state.feed = state.feed.filter((post) => String(post.id) !== String(postId));
     renderFeed();
@@ -1379,7 +1549,7 @@
       ${platforms.map((platform) => `<span class="info-pill">${escapeHtml(platform)}</span>`).join("")}
     `;
 
-    els.feedSubtitle.textContent = `Conteúdo publicado em ${game.name}.`;
+    els.feedSubtitle.textContent = `Anúncios publicados em ${game.name}.`;
     renderFollowState();
     renderFollowers();
     renderFeed();
@@ -1418,15 +1588,36 @@
     `).join("");
   }
 
+  function setFollowersPanelOpen(open) {
+    els.followersPanel?.classList.toggle("is-open", open);
+    els.followersButton?.setAttribute("aria-expanded", open ? "true" : "false");
+    document.body.classList.toggle("has-game-followers-open", open);
+  }
+
+  function isFollowersPanelOpen() {
+    return Boolean(els.followersPanel?.classList.contains("is-open"));
+  }
+
+  function setFeedFilter(filter, { scroll = false } = {}) {
+    state.filter = filter || "all";
+    els.filterButtons.forEach((item) => {
+      item.classList.toggle("is-active", item.dataset.gameFeedFilter === state.filter);
+    });
+    renderFeed();
+    if (scroll) {
+      document.querySelector(".filter-bar")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
   function renderFeed({ prepareVideos = true } = {}) {
     if (state.loading) return;
-    const filtered = state.feed.filter((item) => state.filter === "all" || item.type === state.filter);
+    const filtered = state.feed.filter((item) => item.type === "listing");
     const listings = state.feed.filter((item) => item.type === "listing");
-    els.postsCount.textContent = formatCount(state.feed.length);
+    els.postsCount.textContent = formatCount(listings.length);
     els.listingsCount.textContent = formatCount(listings.length);
 
     if (!filtered.length) {
-      els.feedList.innerHTML = `<div class="post-card empty-state">${state.filter === "listing" ? "Nenhum anúncio publicado para este jogo." : "Nada novo por aqui."}</div>`;
+      els.feedList.innerHTML = `<div class="post-card empty-state">Nenhum anúncio publicado para este jogo.</div>`;
       return;
     }
 
@@ -1439,7 +1630,6 @@
       <article class="post-card">
         ${media}
         <div class="post-body">
-          ${post.type === "listing" ? `<span class="post-marketplace-badge">Anúncio</span>` : ""}
           ${renderMentionLine(authorName, post)}
           <div class="post-meta">
             <a class="author-block" href="${getProfileUrl(author)}">
@@ -1456,7 +1646,7 @@
             </div>
           </div>
           <div>
-            ${post.body || post.text ? `<p class="post-text">${escapeHtml(post.body || post.text)}</p>` : ""}
+            ${getListingPreviewText(post.body || post.text) ? `<p class="post-text">${escapeHtml(getListingPreviewText(post.body || post.text))}</p>` : ""}
           </div>
           <a class="channel-line" href="${getCurrentGameUrl()}">
             <span class="channel-game-logo" aria-hidden="true">
@@ -1584,18 +1774,35 @@
   }
 
   els.followButton.addEventListener("click", toggleFollow);
+  els.followersButton?.addEventListener("click", () => setFollowersPanelOpen(!isFollowersPanelOpen()));
+  els.followersPanelClose?.addEventListener("click", () => setFollowersPanelOpen(false));
+  els.postsButton?.addEventListener("click", () => setFeedFilter("all", { scroll: true }));
+  els.listingsButton?.addEventListener("click", () => setFeedFilter("listing", { scroll: true }));
   els.publishPost?.addEventListener("click", publishGamePost);
-  els.composerFile?.addEventListener("change", renderComposerFile);
+  els.composerFile?.addEventListener("change", () => {
+    renderComposerFile().catch((error) => {
+      console.warn("Não foi possível validar o vídeo selecionado.", error);
+      setVideoHelperMessage("Não foi possível validar o vídeo selecionado. Tente outro arquivo.", "warning");
+      markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+      clearComposerFile({ preserveVideoHelper: true });
+    });
+  });
   els.composerClearFile?.addEventListener("click", clearComposerFile);
+  els.composerText?.addEventListener("input", () => {
+    if (state.composerMode === "listing") showListingHelperMessage();
+  });
   els.composerModeButtons.forEach((button) => {
     button.addEventListener("click", () => setComposerMode(button.dataset.gameComposerMode));
   });
   els.listingCurrency?.addEventListener("change", (event) => {
+    showListingHelperMessage();
+    clearComposerInvalid(els.listingCurrency);
     syncListingDraftsFromDom();
-    state.listingCurrency = event.target.value || "BRL";
+    state.listingCurrency = event.target.value || "";
     renderListingItems(state.listingItemDrafts);
   });
   els.listingItemAdd?.addEventListener("click", () => {
+    showListingHelperMessage();
     const items = getListingDraftItems();
     if (items.length >= 15) return;
     items.push(createListingDraftItem());
@@ -1606,13 +1813,20 @@
       ? event.target.closest("[data-listing-item-remove]")
       : null;
     if (!removeButton) return;
+    showListingHelperMessage();
     const row = removeButton.closest("[data-listing-item-row]");
-    if (!row || state.listingItemDrafts.length <= 1) return;
+    if (!row) return;
     syncListingDraftsFromDom();
     const removedId = row.dataset.listingItemId || "";
-    const removed = state.listingItemDrafts.find((item) => String(item.id) === String(removedId));
+    const itemIndex = state.listingItemDrafts.findIndex((item) => String(item.id) === String(removedId));
+    if (itemIndex < 0) return;
+    const removed = state.listingItemDrafts[itemIndex];
     revokeListingPreview(removed);
-    state.listingItemDrafts = state.listingItemDrafts.filter((item) => String(item.id) !== String(removedId));
+    if (itemIndex === 0) {
+      state.listingItemDrafts[itemIndex] = createListingDraftItem({ id: removed.id });
+    } else {
+      state.listingItemDrafts.splice(itemIndex, 1);
+    }
     renderListingItems(state.listingItemDrafts);
   });
   els.listingItems?.addEventListener("change", (event) => {
@@ -1620,11 +1834,13 @@
       ? event.target.closest("[data-listing-item-image]")
       : null;
     if (!input) return;
+    showListingHelperMessage();
     const row = input.closest("[data-listing-item-row]");
     const file = input.files?.[0] || null;
     if (!row || !file) return;
     if (!isImageFile(file)) {
-      window.alert("Selecione uma imagem JPG, PNG, WebP ou GIF.");
+      showListingHelperMessage("As imagens dos itens precisam ser JPG, PNG, WebP ou GIF.", "warning");
+      markComposerInvalid(input.closest(".listing-item-image-preview"));
       input.value = "";
       return;
     }
@@ -1638,18 +1854,31 @@
     item.previewObjectUrl = true;
     renderListingItems(state.listingItemDrafts);
   });
-  setComposerMode("post");
+  els.listingItems?.addEventListener("input", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest("[data-listing-item-row]")) return;
+    showListingHelperMessage();
+    clearComposerFieldInvalidState(target);
+  });
+  setComposerMode("listing");
   els.filterButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      state.filter = button.dataset.gameFeedFilter;
-      els.filterButtons.forEach((item) => item.classList.toggle("is-active", item === button));
-      renderFeed();
-    });
+    button.addEventListener("click", () => setFeedFilter(button.dataset.gameFeedFilter));
   });
 
   document.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : event.target?.parentElement;
     if (!target) return;
+
+    if (
+      isFollowersPanelOpen()
+      && !target.closest("#game-followers-panel")
+      && !target.closest("#game-followers-button")
+      && window.matchMedia("(max-width: 820px)").matches
+    ) {
+      event.preventDefault();
+      setFollowersPanelOpen(false);
+      return;
+    }
 
     const menuToggle = target.closest("[data-post-menu-toggle]");
     if (menuToggle) {
@@ -1820,8 +2049,11 @@
         return;
       }
     }
-    if (event.key === "Escape") closePostMenus();
-    if (event.key === "Escape") closeCommentMentionSuggestions();
+    if (event.key === "Escape") {
+      closePostMenus();
+      closeCommentMentionSuggestions();
+      setFollowersPanelOpen(false);
+    }
   });
 
   document.addEventListener("gimerr:video-view", (event) => {

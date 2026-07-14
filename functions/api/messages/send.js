@@ -71,6 +71,7 @@ export async function onRequestPost({ request, env }) {
         mediaType: message.media_type || "",
         createdAt: message.created_at,
         isOwn: true,
+        readByOthers: false,
         author: null,
       },
     });

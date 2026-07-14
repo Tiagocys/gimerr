@@ -48,40 +48,35 @@
       <section class="feed-column" aria-label="Feed">
         <div class="feed-header">
           <div>
-            <h1>Feed</h1>
-            <p id="feed-subtitle">Posts recentes dos games que você segue.</p>
+            <h1>Marketplace</h1>
+            <p id="feed-subtitle">Anúncios recentes dos games que você segue.</p>
           </div>
           <button class="primary-button" id="open-composer" type="button">
             <svg aria-hidden="true" viewBox="0 0 24 24">
               <path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/>
             </svg>
-            Novo post
+            Novo anúncio
           </button>
         </div>
 
-        <section class="composer" id="composer">
-          <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação">
-            <button class="tab-button is-active" type="button" data-composer-mode="post">Post</button>
-            <button class="tab-button" type="button" data-composer-mode="listing">Anúncio</button>
+        <section class="composer is-listing-mode" id="composer">
+          <div class="composer-mobile-head">
+            <h2>Novo anúncio</h2>
+            <button class="ghost-icon" id="close-composer" type="button" aria-label="Fechar novo anúncio">x</button>
           </div>
-          <textarea id="composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser."></textarea>
+          <textarea id="composer-text" rows="4" maxlength="1200" placeholder="Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes."></textarea>
           <div class="composer-mention-suggestions" id="composer-mention-suggestions" hidden></div>
-          <div class="listing-composer-fields" id="listing-composer-fields" hidden>
-            <p class="composer-listing-helper" id="composer-listing-helper">Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.</p>
-            <label class="listing-currency-field" for="listing-currency">
-              <span>Moeda dos itens</span>
-              <select id="listing-currency">
-                <option value="BRL">BRL - Real brasileiro</option>
-                <option value="USD">USD - Dólar americano</option>
-                <option value="EUR">EUR - Euro</option>
-                <option value="JPY">JPY - Iene japonês</option>
-                <option value="GBP">GBP - Libra esterlina</option>
-                <option value="CNY">CNY - Yuan chinês</option>
-              </select>
+          <div class="listing-video-upload">
+            <label class="text-button upload-button" for="composer-file">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M17 10.5V6c0-1.1-.9-2-2-2H5C3.9 4 3 4.9 3 6v12c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-4.5l4 4v-11l-4 4Z"/>
+              </svg>
+              Adicionar vídeo
             </label>
-            <div class="listing-items" id="listing-items"></div>
-            <button class="text-button listing-item-add" id="listing-item-add" type="button">Adicionar item</button>
+            <span>Opcional: 1 vídeo de até 3 minutos e 500 MB.</span>
+            <input id="composer-file" class="composer-video-input" type="file" accept="video/mp4,video/webm,video/quicktime">
           </div>
+          <p class="composer-step-helper" id="composer-video-helper" hidden></p>
           <div class="composer-media" id="composer-media" hidden>
             <div class="composer-media-summary">
               <span id="composer-file-name"></span>
@@ -89,31 +84,65 @@
             </div>
             <button class="text-button" id="composer-clear-file" type="button">Remover</button>
           </div>
-          <div class="composer-footer">
-            <select id="composer-server" aria-label="Game">
-              <option value="">Carregando games...</option>
-            </select>
-            <div class="composer-actions">
-              <label class="text-button upload-button" for="composer-file">
-                <svg aria-hidden="true" viewBox="0 0 24 24">
-                  <path d="M19 13v6H5v-6H3v8h18v-8h-2ZM13 5.8l3.6 3.6L18 8l-6-6-6 6 1.4 1.4L11 5.8V16h2V5.8Z"/>
-                </svg>
-                Arquivo
+          <div class="listing-composer-fields" id="listing-composer-fields">
+            <div class="listing-meta-row">
+              <label class="listing-currency-field" for="listing-currency">
+                <span>Moeda do anúncio</span>
+                <select id="listing-currency">
+                  <option value="">Selecione uma moeda</option>
+                  <option value="BRL">BRL - Real brasileiro</option>
+                  <option value="USD">USD - Dólar americano</option>
+                  <option value="EUR">EUR - Euro</option>
+                  <option value="JPY">JPY - Iene japonês</option>
+                  <option value="GBP">GBP - Libra esterlina</option>
+                  <option value="CNY">CNY - Yuan chinês</option>
+                </select>
               </label>
-              <input id="composer-file" type="file" accept="image/*,video/*">
+              <label class="composer-game-field" for="composer-game-search">
+                <span>Jogo do anúncio</span>
+                <div class="composer-game-combobox">
+                  <input id="composer-game-search" type="search" autocomplete="off" placeholder="Buscar jogo">
+                  <input id="composer-server" type="hidden">
+                  <div class="composer-game-selected" id="composer-game-selected" hidden></div>
+                  <div class="composer-game-suggestions" id="composer-game-suggestions" hidden></div>
+                </div>
+              </label>
+            </div>
+            <div class="listing-items" id="listing-items">
+              <div class="listing-item-row" data-listing-item-row data-listing-item-id="index-listing-item-1">
+                <label>
+                  <span>Item</span>
+                  <input type="text" data-listing-item-name maxlength="60" placeholder="Nome do item">
+                </label>
+                <label>
+                  <span>Preço</span>
+                  <div class="price-input">
+                    <span>Moeda</span>
+                    <input type="number" data-listing-item-price min="0" step="0.01" inputmode="decimal" placeholder="0,00">
+                  </div>
+                </label>
+                <label class="listing-item-image-field">
+                  <span>Imagem (opcional)</span>
+                  <input type="file" data-listing-item-image accept="image/jpeg,image/png,image/webp,image/gif">
+                  <div class="listing-item-image-preview">
+                    <span>Selecionar imagem</span>
+                  </div>
+                </label>
+                <button class="ghost-icon listing-item-remove" type="button" data-listing-item-remove aria-label="Limpar item">x</button>
+              </div>
+            </div>
+            <button class="text-button listing-item-add" id="listing-item-add" type="button">Adicione mais 14 itens</button>
+          </div>
+          <div class="composer-footer">
+            <p class="composer-submit-helper" id="composer-listing-helper" hidden></p>
+            <div class="composer-actions">
               <button class="text-button" id="cancel-listing-edit" type="button" hidden>Cancelar edição</button>
-              <button class="primary-button" id="publish-post" type="button">Publicar</button>
+              <button class="primary-button" id="publish-post" type="button">Publicar anúncio</button>
             </div>
           </div>
         </section>
 
-        <div class="filter-bar" role="tablist" aria-label="Filtros do feed">
-          <button class="filter-chip is-active" type="button" data-filter="all">Tudo</button>
-          <button class="filter-chip" type="button" data-filter="following">Seguindo <span class="filter-count" data-filter-count="following" hidden>0</span></button>
-          <button class="filter-chip" type="button" data-filter="listing">Marketplace <span class="filter-count" data-filter-count="listing" hidden>0</span></button>
-        </div>
-
-        <div class="marketplace-feed-search" id="marketplace-feed-search" hidden>
+        <div class="marketplace-feed-search" id="marketplace-feed-search">
           <label for="marketplace-search">Buscar no Marketplace</label>
           <input id="marketplace-search" type="search" placeholder="Buscar anúncio, game, item ou vendedor">
         </div>
@@ -189,6 +218,7 @@
   <script src="./video-player.js" defer></script>
   <script src="./adcash-ads.js" defer></script>
   <script src="./media-lightbox.js" defer></script>
+  <script src="./share-modal.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>

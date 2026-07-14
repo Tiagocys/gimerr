@@ -9,24 +9,34 @@ const LISTING_CURRENCY_SYMBOLS = {
   GBP: "£",
   CNY: "¥",
 };
+const LISTING_VIDEO_MAX_BYTES = 500 * 1024 * 1024;
+const LISTING_VIDEO_MAX_SECONDS = 180;
+const LISTING_VIDEO_THUMBNAIL_MAX_WIDTH = 640;
+const LISTING_VIDEO_THUMBNAIL_QUALITY = 0.72;
 
 const state = {
-  filter: "all",
+  filter: "listing",
   search: "",
   marketplaceSearch: "",
-  composerMode: "post",
-  listingCurrency: "BRL",
+  composerMode: "listing",
+  listingCurrency: "",
   editingListingPostId: "",
+  editingListingVideoItem: null,
   signedIn: false,
   session: null,
   currentProfile: null,
   followedGames: [],
+  availableGames: [],
   followedProfiles: [],
   liveUpdates: [],
   preparedMediaFile: null,
   composerSelectedFiles: [],
   composerPreviewUrls: [],
   listingItemDrafts: [],
+  composerGameResults: [],
+  composerSelectedGame: null,
+  composerGameSearchTimer: null,
+  composerGameSearchRequestId: 0,
   feedLoading: false,
   feedHasMore: true,
   feedOffset: 0,
@@ -78,7 +88,11 @@ const els = {
   composerText: document.querySelector("#composer-text"),
   composerMentionSuggestions: document.querySelector("#composer-mention-suggestions"),
   composerServer: document.querySelector("#composer-server"),
+  composerGameSearch: document.querySelector("#composer-game-search"),
+  composerGameSelected: document.querySelector("#composer-game-selected"),
+  composerGameSuggestions: document.querySelector("#composer-game-suggestions"),
   composerFile: document.querySelector("#composer-file"),
+  composerVideoHelper: document.querySelector("#composer-video-helper"),
   composerMedia: document.querySelector("#composer-media"),
   composerFileName: document.querySelector("#composer-file-name"),
   composerMediaPreviews: document.querySelector("#composer-media-previews"),
@@ -91,6 +105,7 @@ const els = {
   cancelListingEdit: document.querySelector("#cancel-listing-edit"),
   publishPost: document.querySelector("#publish-post"),
   openComposer: document.querySelector("#open-composer"),
+  closeComposer: document.querySelector("#close-composer"),
   composer: document.querySelector("#composer"),
   verificationModal: document.querySelector("#verification-modal"),
   verificationTitle: document.querySelector("#verification-title"),
@@ -123,6 +138,15 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
+function getInitials(name) {
+  return String(name || "G")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "G";
+}
+
 function cleanAuthUrl() {
   const params = new URLSearchParams(window.location.search);
   if (!params.has("code")) return;
@@ -150,8 +174,175 @@ function normalizeFollowedProfile(profile) {
   };
 }
 
+function getAvailableGames() {
+  const byId = new Map();
+  const addGame = (game) => {
+    if (!game?.id) return;
+    const id = String(game.id);
+    if (!byId.has(id)) {
+      byId.set(id, {
+        id: game.id,
+        name: game.name || "Game Gimerr",
+        slug: game.slug || "",
+        coverUrl: game.coverUrl || game.cover_url || "",
+      });
+    }
+  };
+  state.followedGames.forEach(addGame);
+  posts.forEach((post) => addGame(post.game || getGame(post.gameId)));
+  state.availableGames = Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  return state.availableGames;
+}
+
+function normalizeComposerGame(game) {
+  if (!game) return null;
+  const id = game.igdbId || game.igdb_id || game.id;
+  if (!id) return null;
+  return {
+    id,
+    name: game.name || "Game Gimerr",
+    slug: game.slug || "",
+    coverUrl: game.coverUrl || game.cover_url || "",
+    platforms: Array.isArray(game.platforms) ? game.platforms : [],
+    firstReleaseDate: game.firstReleaseDate || game.first_release_date || "",
+  };
+}
+
+function addAvailableGame(game) {
+  const normalized = normalizeComposerGame(game);
+  if (!normalized) return null;
+  const exists = state.availableGames.some((item) => String(item.id) === String(normalized.id));
+  if (!exists) {
+    state.availableGames = [...state.availableGames, normalized]
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  }
+  return normalized;
+}
+
 function getGame(gameId) {
-  return state.followedGames.find((game) => String(game.id) === String(gameId)) || null;
+  return (
+    state.availableGames.find((game) => String(game.id) === String(gameId))
+    || state.followedGames.find((game) => String(game.id) === String(gameId))
+    || posts.find((post) => String(post.gameId) === String(gameId))?.game
+    || null
+  );
+}
+
+function getComposerGameMeta(game) {
+  const platforms = Array.isArray(game?.platforms)
+    ? game.platforms.slice(0, 3).map((platform) => platform.abbreviation || platform.name).filter(Boolean).join(", ")
+    : "";
+  return platforms || game?.firstReleaseDate || "Jogo";
+}
+
+function hideComposerGameSuggestions() {
+  if (els.composerGameSuggestions) {
+    els.composerGameSuggestions.hidden = true;
+    els.composerGameSuggestions.innerHTML = "";
+  }
+}
+
+function renderComposerGameSelection() {
+  if (!els.composerGameSelected || !els.composerGameSearch) return;
+  const game = state.composerSelectedGame;
+  if (!game) {
+    els.composerGameSelected.hidden = true;
+    els.composerGameSelected.innerHTML = "";
+    els.composerGameSearch.hidden = false;
+    return;
+  }
+  els.composerGameSearch.hidden = true;
+  els.composerGameSelected.hidden = false;
+  els.composerGameSelected.innerHTML = `
+    <span class="composer-game-chip">
+      <span class="composer-game-cover" aria-hidden="true">
+        ${game.coverUrl ? `<img src="${escapeHtml(game.coverUrl)}" alt="">` : escapeHtml(getInitials(game.name))}
+      </span>
+      <span class="composer-game-copy">
+        <strong>${escapeHtml(game.name)}</strong>
+        <span>${escapeHtml(getComposerGameMeta(game))}</span>
+      </span>
+      <button class="ghost-icon composer-game-chip-remove" type="button" data-composer-game-clear aria-label="Remover jogo selecionado">x</button>
+    </span>
+  `;
+}
+
+function selectComposerGame(game) {
+  const normalized = addAvailableGame(game);
+  if (!normalized) return;
+  state.composerSelectedGame = normalized;
+  state.composerGameResults = [];
+  if (els.composerServer) els.composerServer.value = String(normalized.id);
+  if (els.composerGameSearch) els.composerGameSearch.value = normalized.name;
+  hideComposerGameSuggestions();
+  renderComposerGameSelection();
+  clearComposerInvalid(els.composerGameSearch);
+  clearComposerInvalid(els.composerGameSelected);
+  showListingHelperMessage();
+}
+
+function renderComposerGameSuggestions(games, message = "") {
+  if (!els.composerGameSuggestions) return;
+  if (message) {
+    els.composerGameSuggestions.innerHTML = `<div class="composer-game-suggestion is-message">${escapeHtml(message)}</div>`;
+    els.composerGameSuggestions.hidden = false;
+    return;
+  }
+  if (!games.length) {
+    els.composerGameSuggestions.innerHTML = `<div class="composer-game-suggestion is-message">Nenhum jogo encontrado.</div>`;
+    els.composerGameSuggestions.hidden = false;
+    return;
+  }
+  els.composerGameSuggestions.innerHTML = games.map((game) => `
+    <button class="composer-game-suggestion" type="button" data-composer-game-id="${escapeHtml(game.id)}">
+      <span class="composer-game-cover">
+        ${game.coverUrl ? `<img src="${escapeHtml(game.coverUrl)}" alt="">` : escapeHtml(getInitials(game.name))}
+      </span>
+      <span class="composer-game-copy">
+        <strong>${escapeHtml(game.name)}</strong>
+        <span>${escapeHtml(getComposerGameMeta(game))}</span>
+      </span>
+    </button>
+  `).join("");
+  els.composerGameSuggestions.hidden = false;
+}
+
+async function searchComposerGames(query) {
+  const term = String(query || "").trim();
+  state.composerGameSearchRequestId += 1;
+  const requestId = state.composerGameSearchRequestId;
+  if (term.length < 2) {
+    hideComposerGameSuggestions();
+    return;
+  }
+  renderComposerGameSuggestions([], "Buscando jogos...");
+  try {
+    const response = await fetch(`/api/games/search?q=${encodeURIComponent(term)}&limit=8`, {
+      headers: { accept: "application/json" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (requestId !== state.composerGameSearchRequestId) return;
+    if (!response.ok) throw new Error(payload.error || "Não foi possível buscar jogos.");
+    const games = (payload.games || []).map(normalizeComposerGame).filter(Boolean);
+    state.composerGameResults = games;
+    renderComposerGameSuggestions(games);
+  } catch (error) {
+    console.warn("Não foi possível buscar jogos para o anúncio.", error);
+    if (requestId === state.composerGameSearchRequestId) {
+      renderComposerGameSuggestions([], "Não foi possível buscar jogos agora.");
+    }
+  }
+}
+
+function clearComposerGameSelection() {
+  state.composerSelectedGame = null;
+  state.composerGameResults = [];
+  if (els.composerServer) els.composerServer.value = "";
+  if (els.composerGameSearch) els.composerGameSearch.value = "";
+  hideComposerGameSuggestions();
+  renderComposerGameSelection();
+  clearComposerInvalid(els.composerGameSearch);
+  clearComposerInvalid(els.composerGameSelected);
 }
 
 function getGameUrl(game) {
@@ -401,8 +592,7 @@ function isImageFile(file) {
 }
 
 function getComposerAccept() {
-  if (state.composerMode === "listing") return "image/jpeg,image/png,image/webp,image/gif";
-  return "image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime";
+  return "video/mp4,video/webm,video/quicktime";
 }
 
 function getPostTypeFromFile(file) {
@@ -432,24 +622,142 @@ function validateComposerFile(file) {
 function validateComposerFiles(files, type = getPostTypeFromComposer(files)) {
   if (!files.length) return true;
   if (type === "listing") {
-    if (files.length > 15) {
-      window.alert("Anúncios aceitam até 15 imagens.");
+    if (files.length > 1) {
+      setVideoHelperMessage("Anúncios aceitam apenas 1 vídeo.", "warning");
+      markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
       return false;
     }
-    if (files.some((file) => !isImageFile(file))) {
-      window.alert("Anúncios aceitam apenas imagens JPG, PNG, WebP ou GIF.");
+    const [file] = files;
+    if (!isVideoFile(file)) {
+      setVideoHelperMessage("O vídeo do anúncio precisa ser MP4, WebM ou MOV.", "warning");
+      markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
       return false;
     }
+    if (file.size > LISTING_VIDEO_MAX_BYTES) {
+      setVideoHelperMessage("O vídeo do anúncio pode ter no máximo 500 MB.", "warning");
+      markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+      return false;
+    }
+    setVideoHelperMessage("");
+    clearComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
     return true;
   }
   return validateComposerFile(files[0]);
 }
 
+function validateListingItemImageFiles(files) {
+  if (files.length > 15) {
+    showListingHelperMessage("Anúncios aceitam até 15 imagens de itens.", "warning");
+    return false;
+  }
+  if (files.some((file) => !isImageFile(file))) {
+    showListingHelperMessage("As imagens dos itens precisam ser JPG, PNG, WebP ou GIF.", "warning");
+    return false;
+  }
+  return true;
+}
+
+function readVideoDuration(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      resolve(Number(video.duration || 0));
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Não foi possível ler a duração do vídeo."));
+    };
+    video.src = url;
+  });
+}
+
+function createVideoThumbnailFile(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+    const url = URL.createObjectURL(file);
+    let settled = false;
+
+    const cleanup = () => {
+      URL.revokeObjectURL(url);
+      video.removeAttribute("src");
+      video.load();
+    };
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("Não foi possível gerar a capa do vídeo."));
+    };
+    const finish = () => {
+      if (settled) return;
+      const sourceWidth = Number(video.videoWidth || 0);
+      const sourceHeight = Number(video.videoHeight || 0);
+      if (!sourceWidth || !sourceHeight) {
+        fail();
+        return;
+      }
+      const scale = Math.min(1, LISTING_VIDEO_THUMBNAIL_MAX_WIDTH / sourceWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(2, Math.round(sourceWidth * scale));
+      canvas.height = Math.max(2, Math.round(sourceHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) {
+        fail();
+        return;
+      }
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          fail();
+          return;
+        }
+        settled = true;
+        cleanup();
+        const baseName = String(file.name || "video").replace(/\.[^.]+$/, "") || "video";
+        resolve(new File([blob], `${baseName}-thumbnail.jpg`, { type: "image/jpeg" }));
+      }, "image/jpeg", LISTING_VIDEO_THUMBNAIL_QUALITY);
+    };
+
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.addEventListener("loadeddata", finish, { once: true });
+    video.addEventListener("error", fail, { once: true });
+    video.src = url;
+    video.load();
+  });
+}
+
+async function validateListingVideoDuration(files) {
+  const [file] = files;
+  if (!file) return true;
+  let duration = 0;
+  try {
+    duration = await readVideoDuration(file);
+  } catch (_) {
+    setVideoHelperMessage("Não foi possível ler a duração do vídeo. Selecione outro arquivo.", "warning");
+    markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+    return false;
+  }
+  if (!duration || duration > LISTING_VIDEO_MAX_SECONDS) {
+    setVideoHelperMessage("O vídeo do anúncio pode ter no máximo 3 minutos.", "warning");
+    markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+    return false;
+  }
+  setVideoHelperMessage("");
+  clearComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+  return true;
+}
+
 function getListingCurrency() {
-  return state.listingCurrency || "BRL";
+  return state.listingCurrency || "";
 }
 
 function formatListingPrice(value, currency = getListingCurrency()) {
+  if (!currency) return "";
   const normalized = String(value || "").replace(/\./g, "").replace(",", ".");
   const number = Number(normalized);
   if (!Number.isFinite(number) || number < 0) return "";
@@ -481,6 +789,11 @@ function resetListingItems() {
   state.listingItemDrafts.forEach(revokeListingPreview);
   state.listingItemDrafts = [createListingDraftItem()];
   renderListingItems(state.listingItemDrafts);
+}
+
+function resetListingCurrency() {
+  state.listingCurrency = "";
+  if (els.listingCurrency) els.listingCurrency.value = "";
 }
 
 function ensureListingDraftItems() {
@@ -602,6 +915,15 @@ function getListingCardData(post) {
   };
 }
 
+function getListingPreviewText(listingData) {
+  return truncateText(
+    listingData?.description
+    || listingData?.items?.find((item) => item.name)?.name
+    || "",
+    58,
+  );
+}
+
 function formatListingItemCount(count) {
   const value = Number(count || 0);
   if (value === 1) return "1 item";
@@ -615,16 +937,74 @@ function truncateText(value, maxLength = 110) {
 }
 
 function validateListingItems(items) {
+  clearListingItemInvalidHighlights();
   if (!items.length) {
-    window.alert("Adicione pelo menos um item ao anúncio.");
+    showListingHelperMessage("Adicione pelo menos um item com preço.", "warning");
+    markListingItemInvalidFields();
     return false;
   }
   const incomplete = items.some((item) => !item.name || !item.priceLabel);
   if (incomplete) {
-    window.alert("Cada item do anúncio precisa ter nome e preço.");
+    showListingHelperMessage("Cada item do anúncio precisa ter nome e preço.", "warning");
+    markListingItemInvalidFields();
     return false;
   }
   return true;
+}
+
+function showListingHelperMessage(message = "", tone = "") {
+  if (!els.listingHelper) return;
+  els.listingHelper.textContent = message;
+  els.listingHelper.hidden = !message;
+  els.listingHelper.className = `composer-submit-helper${tone ? ` is-${tone}` : ""}`;
+}
+
+function setVideoHelperMessage(message = "", tone = "") {
+  if (!els.composerVideoHelper) return;
+  els.composerVideoHelper.textContent = message;
+  els.composerVideoHelper.hidden = !message;
+  els.composerVideoHelper.className = `composer-step-helper${tone ? ` is-${tone}` : ""}`;
+}
+
+function markComposerInvalid(element) {
+  element?.classList?.add("is-composer-invalid");
+}
+
+function clearComposerInvalid(element) {
+  element?.classList?.remove("is-composer-invalid");
+}
+
+function clearListingItemInvalidHighlights() {
+  els.listingItems?.querySelectorAll(".is-composer-invalid").forEach((element) => {
+    element.classList.remove("is-composer-invalid");
+  });
+}
+
+function clearComposerFieldInvalidState(target) {
+  if (!target) return;
+  clearComposerInvalid(target);
+  clearComposerInvalid(target.closest?.(".price-input"));
+}
+
+function markListingItemInvalidFields() {
+  const rows = Array.from(els.listingItems?.querySelectorAll("[data-listing-item-row]") || []);
+  rows.forEach((row) => {
+    const nameInput = row.querySelector("[data-listing-item-name]");
+    const priceInput = row.querySelector("[data-listing-item-price]");
+    if (!nameInput?.value?.trim()) markComposerInvalid(nameInput);
+    if (!priceInput?.value?.trim()) markComposerInvalid(priceInput?.closest(".price-input") || priceInput);
+  });
+}
+
+function validateListingCurrency() {
+  if (getListingCurrency()) {
+    clearComposerInvalid(els.listingCurrency);
+    return true;
+  }
+  showListingHelperMessage("Selecione uma moeda para o anúncio.", "warning");
+  markComposerInvalid(els.listingCurrency);
+  els.listingCurrency?.focus();
+  return false;
 }
 
 function formatRelativeTime(value) {
@@ -931,8 +1311,10 @@ async function sharePost(postId) {
     ? `Veja este vídeo no Gimerr`
     : `Veja este post no Gimerr`;
 
-  if (navigator.share) {
-    await navigator.share({
+  if (window.GimerrShare?.openPostShare) {
+    await window.GimerrShare.openPostShare({
+      postId,
+      post,
       title,
       text: `Publicado em ${gameName}`,
       url,
@@ -1034,21 +1416,21 @@ function renderVideoPoster(post, item) {
 
 function renderListingMedia(post) {
   const items = getPostMediaItems(post);
-  const [firstItem] = items;
+  const firstImage = items.find((item) => item.mediaType?.startsWith("image/"));
   const itemCount = getListingCardData(post).itemCount;
   const countLabel = formatListingItemCount(itemCount);
   const openAttrs = `type="button" data-listing-open data-post-id="${escapeHtml(post.id || "")}" aria-label="Ver anúncio"`;
-  if (!firstItem?.url) {
+  if (!firstImage?.url) {
     return `
       <button class="listing-preview-button listing-placeholder-card" ${openAttrs}>
-        <span class="listing-placeholder-title">Anúncio sem imagem</span>
+        <span class="listing-placeholder-title">Sem imagens</span>
         <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
       </button>
     `;
   }
   return `
     <button class="listing-preview-button" ${openAttrs}>
-      <img src="${escapeHtml(firstItem.url)}" alt="">
+      <img src="${escapeHtml(firstImage.url)}" alt="">
       <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
     </button>
   `;
@@ -1164,6 +1546,7 @@ function renderListingDetail(post, sellerDetails = null) {
   const sellerAvatar = sellerProfile.avatar_url || author.avatarUrl || "./assets/avatar.svg";
   const canMessageSeller = author.id && author.id !== state.currentProfile?.id;
   const items = listingData.items.filter((item) => item.name || item.price || item.priceLabel || item.mediaItem || item.previewUrl);
+  const listingVideo = getPostMediaItems(post).find((item) => item.mediaType?.startsWith("video/"));
   const galleryItems = items
     .filter((item) => item.previewUrl)
     .map((item, index) => ({
@@ -1206,6 +1589,7 @@ function renderListingDetail(post, sellerDetails = null) {
           <h2 id="listing-detail-title">${escapeHtml(formatListingItemCount(listingData.itemCount))}</h2>
           ${listingData.description ? `<p class="listing-detail-description">${escapeHtml(listingData.description)}</p>` : ""}
         </div>
+        ${listingVideo ? renderVideoPoster(post, listingVideo) : ""}
         <div class="listing-detail-items">
           ${itemList || `<p class="empty-state">Nenhum item informado.</p>`}
         </div>
@@ -1266,23 +1650,69 @@ async function loadListingSellerDetails(authorId) {
   return details;
 }
 
+async function loadListingDetailPost(postId) {
+  const response = await fetch(`/api/posts/detail?id=${encodeURIComponent(postId)}`, {
+    headers: { accept: "application/json" },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Não foi possível carregar o anúncio.");
+  return payload.post || null;
+}
+
+function mergeListingDetailPost(fallbackPost, detailPost) {
+  if (!detailPost) return fallbackPost;
+  const index = posts.findIndex((item) => String(item.id) === String(detailPost.id));
+  if (index >= 0) {
+    posts[index] = {
+      ...posts[index],
+      ...detailPost,
+      author: {
+        ...(posts[index].author || {}),
+        ...(detailPost.author || {}),
+      },
+      game: {
+        ...(posts[index].game || {}),
+        ...(detailPost.game || {}),
+      },
+    };
+    return posts[index];
+  }
+  return {
+    ...fallbackPost,
+    ...detailPost,
+    author: {
+      ...(fallbackPost?.author || {}),
+      ...(detailPost.author || {}),
+    },
+    game: {
+      ...(fallbackPost?.game || {}),
+      ...(detailPost.game || {}),
+    },
+  };
+}
+
 function closeListingDetailModal() {
   if (!els.listingDetailModal) return;
+  window.GimerrVideoPlayer?.stopAll?.(els.listingDetailContent);
   els.listingDetailModal.hidden = true;
   if (els.listingDetailContent) els.listingDetailContent.innerHTML = "";
 }
 
 async function openListingDetail(postId) {
-  const post = posts.find((item) => String(item.id) === String(postId));
-  if (!post || !isMarketplacePost(post) || !els.listingDetailModal || !els.listingDetailContent) return;
+  const feedPost = posts.find((item) => String(item.id) === String(postId));
+  if (!feedPost || !isMarketplacePost(feedPost) || !els.listingDetailModal || !els.listingDetailContent) return;
   els.listingDetailModal.hidden = false;
   els.listingDetailContent.innerHTML = `<div class="listing-detail-loading">Carregando anúncio...</div>`;
   try {
+    const detailPost = await loadListingDetailPost(postId);
+    const post = mergeListingDetailPost(feedPost, detailPost);
     const sellerDetails = await loadListingSellerDetails(post.author?.id);
     els.listingDetailContent.innerHTML = renderListingDetail(post, sellerDetails);
+    window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
   } catch (error) {
-    console.warn("Não foi possível carregar detalhes do vendedor.", error);
-    els.listingDetailContent.innerHTML = renderListingDetail(post, null);
+    console.warn("Não foi possível carregar detalhes do anúncio.", error);
+    els.listingDetailContent.innerHTML = renderListingDetail(feedPost, null);
+    window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
   }
 }
 
@@ -1581,7 +2011,7 @@ async function deleteInlineComment(postId, commentId) {
 
 async function deletePost(postId) {
   if (!state.session?.access_token) return;
-  const confirmed = window.confirm("Apagar este post? Essa ação é irreversível.");
+  const confirmed = window.confirm("Apagar este anúncio? Essa ação é irreversível.");
   if (!confirmed) return;
 
   const response = await fetch("/api/posts/delete", {
@@ -1726,7 +2156,8 @@ function renderListingItems(nextItems = null) {
   }
   ensureListingDraftItems();
   const items = state.listingItemDrafts;
-  const currencySymbol = LISTING_CURRENCY_SYMBOLS[getListingCurrency()] || getListingCurrency();
+  const currency = getListingCurrency();
+  const currencySymbol = currency ? (LISTING_CURRENCY_SYMBOLS[currency] || currency) : "Moeda";
   els.listingItems.innerHTML = items.map((item, index) => `
     <div class="listing-item-row" data-listing-item-row data-listing-item-id="${escapeHtml(item.id)}">
       <label>
@@ -1741,78 +2172,76 @@ function renderListingItems(nextItems = null) {
         </div>
       </label>
       <label class="listing-item-image-field">
-        <span>Imagem do item</span>
+        <span>Imagem (opcional)</span>
         <input type="file" data-listing-item-image accept="image/jpeg,image/png,image/webp,image/gif">
         <div class="listing-item-image-preview${item.previewUrl ? " has-image" : ""}">
           ${item.previewUrl ? `<img src="${escapeHtml(item.previewUrl)}" alt="">` : `<span>Selecionar imagem</span>`}
         </div>
       </label>
-      <button class="ghost-icon listing-item-remove" type="button" data-listing-item-remove aria-label="Remover item" ${items.length === 1 ? "disabled" : ""}>x</button>
+      <button class="ghost-icon listing-item-remove" type="button" data-listing-item-remove aria-label="${index === 0 ? "Limpar item" : "Remover item"}">x</button>
     </div>
   `).join("");
+  updateListingItemAddButton(items.length);
+}
+
+function updateListingItemAddButton(itemCount = state.listingItemDrafts.length) {
+  if (!els.listingItemAdd) return;
+  const remaining = Math.max(0, 15 - Number(itemCount || 0));
+  els.listingItemAdd.hidden = remaining <= 0;
+  els.listingItemAdd.textContent = remaining === 1
+    ? "Adicione mais 1 item"
+    : `Adicione mais ${remaining} itens`;
 }
 
 function setComposerMode(mode) {
-  state.composerMode = mode === "listing" ? "listing" : "post";
-  els.composer?.classList.toggle("is-listing-mode", state.composerMode === "listing");
+  state.composerMode = "listing";
+  els.composer?.classList.add("is-listing-mode");
   els.composer?.classList.remove("is-listing-blocked");
   els.composerModeButtons.forEach((button) => {
-    const active = button.dataset.composerMode === state.composerMode;
+    const active = button.dataset.composerMode === "listing";
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-selected", String(active));
   });
   if (els.listingComposerFields) {
-    els.listingComposerFields.hidden = state.composerMode !== "listing";
+    els.listingComposerFields.hidden = false;
   }
   if (els.listingHelper) {
-    els.listingHelper.textContent = "Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.";
-    els.listingHelper.classList.remove("is-warning");
+    showListingHelperMessage();
   }
-  if (els.composerText && state.followedGames.length) {
-    els.composerText.placeholder = state.composerMode === "listing"
-      ? "Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes."
-      : "Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser.";
+  if (els.composerText) {
+    els.composerText.placeholder = "Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes.";
   }
   if (els.publishPost && !els.publishPost.disabled) {
-    els.publishPost.textContent = state.editingListingPostId
-      ? "Salvar anúncio"
-      : (state.composerMode === "listing" ? "Publicar anúncio" : "Publicar");
+    els.publishPost.textContent = state.editingListingPostId ? "Salvar anúncio" : "Publicar anúncio";
   }
-  if (state.composerMode === "listing" && els.listingItems && !els.listingItems.children.length) {
+  if (els.listingItems && !els.listingItems.children.length) {
     renderListingItems();
   }
   if (els.composerFile) {
-    els.composerFile.multiple = state.composerMode === "listing";
+    els.composerFile.multiple = false;
     els.composerFile.accept = getComposerAccept();
   }
-  if (state.composerMode === "listing") {
-    clearComposerFile();
-  } else if (state.composerSelectedFiles.length > 1) {
+  if (state.composerSelectedFiles.length > 1) {
     clearComposerFile();
   }
   setComposerAvailability();
 }
 
 function setComposerAvailability() {
-  const canPost = state.followedGames.length > 0;
-  const unavailable = !canPost;
+  getAvailableGames();
+  const unavailable = false;
   els.composer?.classList.remove("is-listing-blocked");
   if (els.listingHelper) {
-    els.listingHelper.textContent = "Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.";
-    els.listingHelper.classList.remove("is-warning");
+    showListingHelperMessage();
   }
   els.composerFile.accept = getComposerAccept();
   els.composerFile.multiple = state.composerMode === "listing";
-  els.publishPost.textContent = state.editingListingPostId
-    ? "Salvar anúncio"
-    : (state.composerMode === "listing" ? "Publicar anúncio" : "Publicar");
   els.composerText.disabled = unavailable;
-  els.composerServer.disabled = unavailable || Boolean(state.editingListingPostId);
+  if (els.composerGameSearch) els.composerGameSearch.disabled = unavailable || Boolean(state.editingListingPostId);
   els.composerFile.disabled = unavailable;
-  els.publishPost.disabled = unavailable;
-  els.openComposer.disabled = !canPost;
+  els.openComposer.disabled = false;
   els.composerModeButtons.forEach((button) => {
-    button.disabled = !canPost;
+    button.disabled = unavailable;
   });
   if (els.listingCurrency) els.listingCurrency.disabled = unavailable;
   if (els.listingItemAdd) els.listingItemAdd.disabled = unavailable;
@@ -1820,27 +2249,34 @@ function setComposerAvailability() {
     field.disabled = unavailable;
   });
 
-  if (!canPost) {
-    els.composerText.placeholder = "Siga pelo menos um game para publicar no feed.";
-    els.composerServer.innerHTML = `<option value="">Siga um game primeiro</option>`;
-    return;
-  }
-
   els.composerText.placeholder = state.composerMode === "listing"
     ? "Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes."
-    : "Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser.";
-  els.composerServer.innerHTML = state.followedGames.map((game) => `
-    <option value="${escapeHtml(game.id)}">${escapeHtml(game.name)}</option>
-  `).join("");
+    : "Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes.";
+
+  els.publishPost.disabled = false;
+  els.publishPost.textContent = state.editingListingPostId
+    ? "Salvar anúncio"
+    : "Publicar anúncio";
+}
+
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 820px)").matches;
+}
+
+function setMobileComposerOpen(open) {
+  els.composer?.classList.toggle("is-mobile-open", open);
+  document.body.classList.toggle("has-mobile-composer-open", open);
 }
 
 function cancelListingEdit() {
   state.editingListingPostId = "";
+  state.editingListingVideoItem = null;
   if (els.cancelListingEdit) els.cancelListingEdit.hidden = true;
   els.composerText.value = "";
+  resetListingCurrency();
   resetListingItems();
   clearComposerFile();
-  setComposerMode("post");
+  setComposerMode("listing");
   setComposerAvailability();
 }
 
@@ -1849,6 +2285,7 @@ async function startListingEdit(postId) {
   if (!post || !isMarketplacePost(post)) return;
   const parsed = parseListingBody(post.body || "", Array.isArray(post.mediaItems) ? post.mediaItems : getPostMediaItems(post));
   state.editingListingPostId = post.id;
+  state.editingListingVideoItem = getPostMediaItems(post).find((item) => item.mediaType?.startsWith("video/")) || null;
   state.listingCurrency = parsed.currency;
   if (els.listingCurrency) els.listingCurrency.value = parsed.currency;
   setComposerMode("listing");
@@ -1856,9 +2293,14 @@ async function startListingEdit(postId) {
   state.listingItemDrafts.forEach(revokeListingPreview);
   state.listingItemDrafts = parsed.items;
   renderListingItems(state.listingItemDrafts);
-  if (els.composerServer) els.composerServer.value = String(post.gameId || "");
+  const game = post.game || getGame(post.gameId);
+  if (game) selectComposerGame(game);
+  else if (els.composerServer) els.composerServer.value = String(post.gameId || "");
   if (els.cancelListingEdit) els.cancelListingEdit.hidden = false;
   setComposerAvailability();
+  if (isMobileViewport()) {
+    setMobileComposerOpen(true);
+  }
   els.composer.scrollIntoView({ behavior: "smooth", block: "start" });
   window.setTimeout(() => els.composerText.focus());
 }
@@ -1961,35 +2403,25 @@ function withTimeout(promise, timeoutMs, message) {
 
 function renderFeed({ prepareVideos = true } = {}) {
   window.GimerrVideoPlayer?.stopAll?.(els.feedList);
-  const followedIds = new Set(state.followedGames.map((game) => String(game.id)));
-  const followedProfileIds = new Set(state.followedProfiles.map((profile) => String(profile.id)));
   const query = state.search.trim().toLowerCase();
   const marketplaceQuery = state.marketplaceSearch.trim().toLowerCase();
   if (els.marketplaceSearchWrap) {
-    els.marketplaceSearchWrap.hidden = state.filter !== "listing";
+    els.marketplaceSearchWrap.hidden = false;
   }
-  els.feedList?.classList.toggle("is-marketplace-grid", state.filter === "listing");
+  els.feedList?.classList.add("is-marketplace-grid");
   const filtered = posts.filter((post) => {
     const game = post.game || getGame(post.gameId);
-    const matchesFollowedGame = followedIds.has(String(post.gameId));
-    const matchesFollowedProfile = followedProfileIds.has(String(post.author?.id));
-    const matchesFollowedSource = matchesFollowedGame || matchesFollowedProfile;
     const matchesSearch = !query || [post.body, game?.name, post.author?.displayName, post.author?.username]
       .join(" ")
       .toLowerCase()
       .includes(query);
-    const matchesMarketplaceSearch = state.filter !== "listing" || !marketplaceQuery || [
+    const matchesMarketplaceSearch = !marketplaceQuery || [
       post.body,
       game?.name,
       post.author?.displayName,
       post.author?.username,
     ].join(" ").toLowerCase().includes(marketplaceQuery);
-    const matchesScope = (() => {
-      if (state.filter === "all") return !isMarketplacePost(post);
-      if (state.filter === "following") return matchesFollowedSource && !isMarketplacePost(post);
-      if (state.filter === "listing") return matchesFollowedSource && isMarketplacePost(post);
-      return false;
-    })();
+    const matchesScope = isMarketplacePost(post);
     return matchesScope && matchesSearch && matchesMarketplaceSearch;
   });
   els.feedList?.classList.toggle("is-empty", !filtered.length);
@@ -2004,13 +2436,13 @@ function renderFeed({ prepareVideos = true } = {}) {
     const loaderHtml = state.feedHasMore
       ? `
         <div class="post-card empty-state">
-          Nenhum post neste filtro por enquanto.
+          Nenhum anúncio por aqui ainda.
           <button class="text-button" type="button" data-feed-load-more ${state.feedLoading ? "disabled" : ""}>
-            ${state.feedLoading ? "Carregando..." : "Carregar mais posts"}
+            ${state.feedLoading ? "Carregando..." : "Carregar mais anúncios"}
           </button>
         </div>
       `
-      : `<div class="post-card empty-state">Nada novo por aqui.</div>`;
+      : `<div class="post-card empty-state">Nenhum anúncio por aqui ainda.</div>`;
     els.feedList.innerHTML = loaderHtml;
     renderFilterCounts();
     return;
@@ -2024,7 +2456,7 @@ function renderFeed({ prepareVideos = true } = {}) {
     const media = renderPostMedia(post);
     const listingData = isMarketplacePost(post) ? getListingCardData(post) : null;
     const bodyText = listingData
-      ? truncateText(listingData.description, 58)
+      ? getListingPreviewText(listingData)
       : post.body;
     const isListing = isMarketplacePost(post);
     return `
@@ -2067,7 +2499,7 @@ function renderFeed({ prepareVideos = true } = {}) {
     ? `
       <div class="feed-pagination" data-feed-sentinel>
         <button class="text-button" type="button" data-feed-load-more ${state.feedLoading ? "disabled" : ""}>
-          ${state.feedLoading ? "Carregando mais posts..." : "Carregar mais posts"}
+          ${state.feedLoading ? "Carregando mais anúncios..." : "Carregar mais anúncios"}
         </button>
       </div>
     `
@@ -2189,7 +2621,6 @@ async function uploadComposerMediaItems(files, target) {
   if (!files.length) return [];
   const uploadedItems = [];
   for (let index = 0; index < files.length; index += 1) {
-    setPublishing(true, files.length > 1 ? `Enviando ${index + 1}/${files.length}...` : "Enviando...");
     const uploaded = await uploadComposerMedia(files[index], target);
     uploadedItems.push({
       url: uploaded.url,
@@ -2230,7 +2661,7 @@ async function createFeedPost({ game, type, text, uploadedMediaItems }) {
   return payload.post;
 }
 
-async function buildListingMediaItemsForSave(items) {
+async function buildListingMediaItemsForSave(items, videoFiles = []) {
   const uploadedItems = [];
   let uploadIndex = 0;
   const newFilesCount = items.filter((item) => item.file).length;
@@ -2242,7 +2673,6 @@ async function buildListingMediaItemsForSave(items) {
     };
     if (item.file) {
       uploadIndex += 1;
-      setPublishing(true, newFilesCount > 1 ? `Enviando ${uploadIndex}/${newFilesCount}...` : "Enviando...");
       const uploaded = await uploadComposerMedia(item.file, "listing");
       uploadedItems.push({
         ...baseItem,
@@ -2260,6 +2690,21 @@ async function buildListingMediaItemsForSave(items) {
     } else {
       uploadedItems.push(baseItem);
     }
+  }
+  if (videoFiles.length) {
+    const uploaded = await uploadComposerMedia(videoFiles[0], "video");
+    const thumbnailFile = await createVideoThumbnailFile(videoFiles[0]);
+    const thumbnail = await uploadComposerMedia(thumbnailFile, "video-thumbnail");
+    uploadedItems.push({
+      url: uploaded.url,
+      key: uploaded.key,
+      mediaType: uploaded.mediaType,
+      mediaRole: "listingVideo",
+      thumbnailUrl: thumbnail.url,
+      thumbnailKey: thumbnail.key,
+    });
+  } else if (state.editingListingVideoItem?.url && state.editingListingVideoItem?.key) {
+    uploadedItems.push(state.editingListingVideoItem);
   }
   return uploadedItems;
 }
@@ -2292,13 +2737,13 @@ async function updateFeedListing({ postId, text, uploadedMediaItems }) {
 }
 
 function setPublishing(isPublishing, label = "Publicar") {
-  const unavailable = !state.followedGames.length;
+  const unavailable = false;
   els.publishPost.disabled = isPublishing || unavailable;
   els.publishPost.textContent = isPublishing
     ? label
-    : (state.editingListingPostId ? "Salvar anúncio" : (state.composerMode === "listing" ? "Publicar anúncio" : "Publicar"));
+    : (state.editingListingPostId ? "Salvar anúncio" : "Publicar anúncio");
   els.composerText.disabled = isPublishing || unavailable;
-  els.composerServer.disabled = isPublishing || unavailable || Boolean(state.editingListingPostId);
+  if (els.composerGameSearch) els.composerGameSearch.disabled = isPublishing || unavailable || Boolean(state.editingListingPostId);
   els.composerFile.disabled = isPublishing || unavailable;
   els.composerModeButtons.forEach((button) => {
     button.disabled = isPublishing || unavailable;
@@ -2312,19 +2757,15 @@ function setPublishing(isPublishing, label = "Publicar") {
 }
 
 async function publishPost() {
-  if (!state.followedGames.length) {
-    return;
-  }
-
   const text = els.composerText.value.trim();
-  const type = state.composerMode === "listing"
-    ? "listing"
-    : getPostTypeFromComposer(state.composerSelectedFiles);
+  const type = "listing";
   const listingItems = type === "listing" ? getListingItemsFromComposer() : [];
-  const files = type === "listing"
-    ? listingItems.map((item) => item.file).filter(Boolean)
-    : state.composerSelectedFiles;
+  const itemImageFiles = listingItems.map((item) => item.file).filter(Boolean);
+  const videoFiles = state.composerSelectedFiles;
+  const files = [...itemImageFiles, ...videoFiles];
   const finalText = type === "listing" ? buildListingBody(text, listingItems) : text;
+
+  if (type === "listing" && !validateListingCurrency()) return;
 
   if (type === "listing" && !validateListingItems(listingItems)) return;
 
@@ -2333,17 +2774,25 @@ async function publishPost() {
     return;
   }
 
-  const game = getGame(els.composerServer.value);
-  if (!game) return;
+  const game = getGame(els.composerServer.value) || state.composerSelectedGame;
+  if (!game) {
+    if (type === "listing") {
+      showListingHelperMessage("Selecione um jogo para publicar o anúncio.", "warning");
+    }
+    markComposerInvalid(els.composerGameSearch?.hidden ? els.composerGameSelected : els.composerGameSearch);
+    els.composerGameSearch?.focus();
+    return;
+  }
 
-  if (!validateComposerFiles(files, type)) return;
+  if (!validateListingItemImageFiles(itemImageFiles)) return;
+  if (!validateComposerFiles(videoFiles, type)) return;
+  if (!await validateListingVideoDuration(videoFiles)) return;
 
   try {
+    setPublishing(true, "Publicando...");
     let uploadedMediaItems = [];
     if (type === "listing") {
-      const imageFiles = listingItems.map((item) => item.file).filter(Boolean);
-      if (!validateComposerFiles(imageFiles, type)) return;
-      uploadedMediaItems = await buildListingMediaItemsForSave(listingItems);
+      uploadedMediaItems = await buildListingMediaItemsForSave(listingItems, videoFiles);
     } else {
       const preparedFiles = [];
       for (const file of files) {
@@ -2351,10 +2800,8 @@ async function publishPost() {
         if (!preparedFile) return;
         preparedFiles.push(preparedFile);
       }
-      setPublishing(true, preparedFiles.length ? "Enviando..." : "Publicando...");
       uploadedMediaItems = await uploadComposerMediaItems(preparedFiles, type);
     }
-    setPublishing(true, state.editingListingPostId ? "Salvando..." : "Publicando...");
     if (state.editingListingPostId) {
       await updateFeedListing({ postId: state.editingListingPostId, text: finalText, uploadedMediaItems });
     } else {
@@ -2362,9 +2809,14 @@ async function publishPost() {
     }
     els.composerText.value = "";
     state.editingListingPostId = "";
+    state.editingListingVideoItem = null;
     if (els.cancelListingEdit) els.cancelListingEdit.hidden = true;
-    if (type === "listing") resetListingItems();
+    if (type === "listing") {
+      resetListingCurrency();
+      resetListingItems();
+    }
     clearComposerFile();
+    setMobileComposerOpen(false);
     state.feedOffset = 0;
     state.feedHasMore = true;
     await loadFeedPosts();
@@ -2403,19 +2855,10 @@ function getComposerFiles() {
 }
 
 function addComposerSelectedFiles(files) {
-  if (state.composerMode !== "listing") {
-    state.composerSelectedFiles = files.slice(0, 1);
-    return;
-  }
-  const bySignature = new Map(state.composerSelectedFiles.map((file) => [getFileSignature(file), file]));
-  files.forEach((file) => {
-    if (bySignature.size >= 15) return;
-    bySignature.set(getFileSignature(file), file);
-  });
-  state.composerSelectedFiles = Array.from(bySignature.values()).slice(0, 15);
+  state.composerSelectedFiles = Array.from(files || []).slice(0, 1);
 }
 
-function renderComposerFile() {
+async function renderComposerFile() {
   const selectedFiles = Array.from(els.composerFile.files || []);
   if (selectedFiles.length) addComposerSelectedFiles(selectedFiles);
   els.composerFile.value = "";
@@ -2431,7 +2874,11 @@ function renderComposerFile() {
 
   const type = getPostTypeFromComposer(files);
   if (!validateComposerFiles(files, type)) {
-    clearComposerFile();
+    clearComposerFile({ preserveVideoHelper: true });
+    return;
+  }
+  if (type === "listing" && !await validateListingVideoDuration(files)) {
+    clearComposerFile({ preserveVideoHelper: true });
     return;
   }
 
@@ -2454,11 +2901,18 @@ function renderComposerFile() {
   state.preparedMediaFile = null;
 }
 
-function clearComposerFile() {
+function clearComposerFile(options = {}) {
   revokeComposerPreviewUrls();
   state.composerSelectedFiles = [];
   els.composerFile.value = "";
-  renderComposerFile();
+  els.composerMedia.hidden = true;
+  els.composerFileName.textContent = "";
+  if (els.composerMediaPreviews) els.composerMediaPreviews.innerHTML = "";
+  state.preparedMediaFile = null;
+  if (!options.preserveVideoHelper) {
+    setVideoHelperMessage("");
+    clearComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+  }
 }
 
 els.filterButtons.forEach((button) => {
@@ -2480,12 +2934,15 @@ els.composerModeButtons.forEach((button) => {
 });
 
 els.listingCurrency?.addEventListener("change", (event) => {
+  showListingHelperMessage();
+  clearComposerInvalid(els.listingCurrency);
   syncListingDraftsFromDom();
-  state.listingCurrency = event.target.value || "BRL";
+  state.listingCurrency = event.target.value || "";
   renderListingItems(state.listingItemDrafts);
 });
 
 els.listingItemAdd?.addEventListener("click", () => {
+  showListingHelperMessage();
   const items = getListingDraftItems();
   if (items.length >= 15) return;
   items.push(createListingDraftItem());
@@ -2497,13 +2954,20 @@ els.listingItems?.addEventListener("click", (event) => {
     ? event.target.closest("[data-listing-item-remove]")
     : null;
   if (!removeButton) return;
+  showListingHelperMessage();
   const row = removeButton.closest("[data-listing-item-row]");
-  if (!row || state.listingItemDrafts.length <= 1) return;
+  if (!row) return;
   syncListingDraftsFromDom();
   const removedId = row.dataset.listingItemId || "";
-  const removed = state.listingItemDrafts.find((item) => String(item.id) === String(removedId));
+  const itemIndex = state.listingItemDrafts.findIndex((item) => String(item.id) === String(removedId));
+  if (itemIndex < 0) return;
+  const removed = state.listingItemDrafts[itemIndex];
   revokeListingPreview(removed);
-  state.listingItemDrafts = state.listingItemDrafts.filter((item) => String(item.id) !== String(removedId));
+  if (itemIndex === 0) {
+    state.listingItemDrafts[itemIndex] = createListingDraftItem({ id: removed.id });
+  } else {
+    state.listingItemDrafts.splice(itemIndex, 1);
+  }
   renderListingItems(state.listingItemDrafts);
 });
 
@@ -2512,11 +2976,13 @@ els.listingItems?.addEventListener("change", (event) => {
     ? event.target.closest("[data-listing-item-image]")
     : null;
   if (!input) return;
+  showListingHelperMessage();
   const row = input.closest("[data-listing-item-row]");
   const file = input.files?.[0] || null;
   if (!row || !file) return;
   if (!isImageFile(file)) {
-    window.alert("Selecione uma imagem JPG, PNG, WebP ou GIF.");
+    showListingHelperMessage("As imagens dos itens precisam ser JPG, PNG, WebP ou GIF.", "warning");
+    markComposerInvalid(input.closest(".listing-item-image-preview"));
     input.value = "";
     return;
   }
@@ -2531,7 +2997,17 @@ els.listingItems?.addEventListener("change", (event) => {
   renderListingItems(state.listingItemDrafts);
 });
 
-els.composerText.addEventListener("input", updateMentionSuggestions);
+els.listingItems?.addEventListener("input", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target?.closest("[data-listing-item-row]")) return;
+  showListingHelperMessage();
+  clearComposerFieldInvalidState(target);
+});
+
+els.composerText.addEventListener("input", () => {
+  if (state.composerMode === "listing") showListingHelperMessage();
+  updateMentionSuggestions();
+});
 els.composerText.addEventListener("click", updateMentionSuggestions);
 els.composerText.addEventListener("keyup", (event) => {
   if (["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(event.key)) return;
@@ -2582,7 +3058,14 @@ els.composerMentionSuggestions?.addEventListener("mousedown", (event) => {
 });
 
 els.publishPost.addEventListener("click", publishPost);
-els.composerFile.addEventListener("change", renderComposerFile);
+els.composerFile.addEventListener("change", () => {
+  renderComposerFile().catch((error) => {
+    console.warn("Não foi possível validar o vídeo selecionado.", error);
+    setVideoHelperMessage("Não foi possível validar o vídeo selecionado. Tente outro arquivo.", "warning");
+    markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+    clearComposerFile({ preserveVideoHelper: true });
+  });
+});
 els.composerClearFile.addEventListener("click", clearComposerFile);
 els.cancelListingEdit?.addEventListener("click", cancelListingEdit);
 els.listingDetailClose?.addEventListener("click", closeListingDetailModal);
@@ -2826,6 +3309,9 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest?.("[data-comment-mention-suggestions]")) {
     closeCommentMentionSuggestions();
   }
+  if (!event.target.closest?.(".composer-game-field")) {
+    hideComposerGameSuggestions();
+  }
 });
 
 document.addEventListener("mousedown", (event) => {
@@ -2866,6 +3352,8 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     closePostMenus();
     closeMentionSuggestions();
+    hideComposerGameSuggestions();
+    setMobileComposerOpen(false);
     if (!els.verificationModal.hidden) closeVerificationModal();
   }
 });
@@ -2882,9 +3370,59 @@ document.addEventListener("gimerr:video-view", (event) => {
 });
 
 els.openComposer.addEventListener("click", () => {
-  if (!state.followedGames.length) return;
+  if (isMobileViewport()) {
+    setMobileComposerOpen(true);
+    window.setTimeout(() => els.composerText.focus());
+    return;
+  }
   els.composer.scrollIntoView({ behavior: "smooth", block: "start" });
   els.composerText.focus();
+});
+
+els.closeComposer?.addEventListener("click", () => {
+  setMobileComposerOpen(false);
+});
+
+window.addEventListener("resize", () => {
+  if (!isMobileViewport()) setMobileComposerOpen(false);
+});
+
+els.composerGameSearch?.addEventListener("input", (event) => {
+  const value = event.target.value || "";
+  if (state.composerSelectedGame && value !== state.composerSelectedGame.name) {
+    clearComposerGameSelection();
+  }
+  clearTimeout(state.composerGameSearchTimer);
+  state.composerGameSearchTimer = window.setTimeout(() => searchComposerGames(value), 220);
+});
+
+els.composerGameSearch?.addEventListener("focus", () => {
+  const value = els.composerGameSearch.value || "";
+  if (state.composerGameResults.length) {
+    renderComposerGameSuggestions(state.composerGameResults);
+    return;
+  }
+  if (value.trim().length >= 2) searchComposerGames(value);
+});
+
+els.composerGameSelected?.addEventListener("click", (event) => {
+  const clearButton = event.target instanceof Element
+    ? event.target.closest("[data-composer-game-clear]")
+    : null;
+  if (!clearButton) return;
+  event.preventDefault();
+  clearComposerGameSelection();
+  window.setTimeout(() => els.composerGameSearch?.focus());
+});
+
+els.composerGameSuggestions?.addEventListener("mousedown", (event) => {
+  const button = event.target instanceof Element
+    ? event.target.closest("[data-composer-game-id]")
+    : null;
+  if (!button) return;
+  event.preventDefault();
+  const game = state.composerGameResults.find((item) => String(item.id) === String(button.dataset.composerGameId));
+  if (game) selectComposerGame(game);
 });
 
 async function init() {
@@ -2934,8 +3472,9 @@ async function init() {
       setComposerAvailability();
     });
 
-  const feedPromise = withTimeout(loadFeedPosts(), 12000, "O feed demorou mais que o esperado.")
+    const feedPromise = withTimeout(loadFeedPosts(), 12000, "O feed demorou mais que o esperado.")
     .then(() => {
+      setComposerAvailability();
       renderFeed();
     })
     .catch((error) => {

@@ -5,7 +5,9 @@ import { requireDiscordBotVerifiedForVideoUpload } from "../../_shared/verificat
 const VALID_TYPES = new Set(["post", "video", "listing"]);
 const VALID_MEDIA_PREFIXES = ["posts/", "videos/", "market/"];
 const VIDEO_MEDIA_PREFIXES = ["videos/originals/", "videos/ready/", "videos/"];
+const VIDEO_THUMBNAIL_PREFIX = "videos/thumbnails/";
 const MAX_LISTING_MEDIA_ITEMS = 15;
+const MAX_LISTING_VIDEO_ITEMS = 1;
 
 function cleanText(value, maxLength) {
   return String(value || "")
@@ -56,6 +58,9 @@ function inferPostType(payloadType, mediaKey, mediaType) {
 
 function isValidMediaKeyForType(type, key) {
   if (!key) return true;
+  if (type === "listing") {
+    return key.startsWith("market/") || VIDEO_MEDIA_PREFIXES.some((prefix) => key.startsWith(prefix));
+  }
   return VALID_MEDIA_PREFIXES.some((prefix) => key.startsWith(prefix))
     && key.startsWith(getFolderForType(type));
 }
@@ -64,11 +69,15 @@ function normalizeMediaItems(items, postType) {
   if (!Array.isArray(items)) return [];
   const normalized = [];
   const seen = new Set();
+  let listingVideoCount = 0;
+  let listingImageCount = 0;
 
   for (const item of items) {
     const url = cleanText(item?.url, 500);
     const key = cleanText(item?.key, 500);
     const mediaType = cleanText(item?.mediaType, 120);
+    const thumbnailUrl = cleanText(item?.thumbnailUrl, 500);
+    const thumbnailKey = cleanText(item?.thumbnailKey, 500);
     const itemName = cleanText(item?.itemName, 120);
     const priceLabel = cleanText(item?.priceLabel, 80);
     const position = Number.parseInt(String(item?.position ?? ""), 10);
@@ -77,7 +86,15 @@ function normalizeMediaItems(items, postType) {
     if (!hasMedia && !itemName && !priceLabel) continue;
     if (hasMedia && seen.has(key)) continue;
     if (hasMedia && !isValidMediaKeyForType(postType, key)) continue;
-    if (hasMedia && postType === "listing" && !mediaType.startsWith("image/")) continue;
+    if (hasMedia && postType === "listing") {
+      const isListingImage = mediaType.startsWith("image/") && key.startsWith("market/");
+      const isListingVideo = mediaType.startsWith("video/") && VIDEO_MEDIA_PREFIXES.some((prefix) => key.startsWith(prefix));
+      if (!isListingImage && !isListingVideo) continue;
+      if (isListingVideo && listingVideoCount >= MAX_LISTING_VIDEO_ITEMS) continue;
+      if (isListingImage && listingImageCount >= MAX_LISTING_MEDIA_ITEMS) continue;
+      if (isListingVideo) listingVideoCount += 1;
+      if (isListingImage) listingImageCount += 1;
+    }
     if (postType !== "listing" && normalized.length) continue;
     if (hasMedia) seen.add(key);
     normalized.push({
@@ -85,8 +102,11 @@ function normalizeMediaItems(items, postType) {
       ...(postType === "listing" && itemName ? { itemName } : {}),
       ...(postType === "listing" && priceLabel ? { priceLabel } : {}),
       ...(postType === "listing" && Number.isFinite(position) ? { position } : {}),
+      ...(postType === "listing" && mediaType.startsWith("video/") ? { mediaRole: "listingVideo" } : {}),
+      ...(postType === "listing" && mediaType.startsWith("video/") && thumbnailUrl && thumbnailKey.startsWith(VIDEO_THUMBNAIL_PREFIX)
+        ? { thumbnailUrl, thumbnailKey }
+        : {}),
     });
-    if (postType === "listing" && normalized.length >= MAX_LISTING_MEDIA_ITEMS) break;
   }
 
   return normalized;
@@ -220,8 +240,8 @@ export async function onRequestPost({ request, env }) {
     const body = postType === "listing"
       ? cleanBodyText(payload.body, 1200)
       : cleanText(payload.body, 220);
-    if (postType === "listing" && Array.isArray(payload.mediaItems) && payload.mediaItems.length > MAX_LISTING_MEDIA_ITEMS) {
-      return jsonResponse({ error: "Anúncios aceitam até 15 imagens." }, { status: 400 });
+    if (postType === "listing" && Array.isArray(payload.mediaItems) && payload.mediaItems.length > MAX_LISTING_MEDIA_ITEMS + MAX_LISTING_VIDEO_ITEMS) {
+      return jsonResponse({ error: "Anúncios aceitam até 15 imagens e 1 vídeo." }, { status: 400 });
     }
 
     let mediaItems = normalizeMediaItems(payload.mediaItems, postType);
@@ -234,7 +254,9 @@ export async function onRequestPost({ request, env }) {
     if (postType === "listing" && !mediaItems.length && primaryMedia?.mediaType?.startsWith("image/")) {
       mediaItems = [primaryMedia];
     }
-    mediaKeys = mediaItems.length ? mediaItems.map((item) => item.key).filter(Boolean) : [mediaKey].filter(Boolean);
+    mediaKeys = mediaItems.length
+      ? mediaItems.flatMap((item) => [item.key, item.thumbnailKey]).filter(Boolean)
+      : [mediaKey].filter(Boolean);
 
     if (!gameId) {
       return jsonResponse({ error: "Selecione um game." }, { status: 400 });
@@ -248,7 +270,11 @@ export async function onRequestPost({ request, env }) {
       return jsonResponse({ error: "Mídia incompatível com o tipo de publicação." }, { status: 400 });
     }
 
-    if (postType === "video") {
+    const listingVideoMedia = postType === "listing"
+      ? mediaItems.find((item) => String(item?.mediaType || "").startsWith("video/") && item?.url && item?.key)
+      : null;
+    const listingHasVideo = Boolean(listingVideoMedia);
+    if (postType === "video" || listingHasVideo) {
       const verification = await requireDiscordBotVerifiedForVideoUpload(env, auth.user.id);
       if (verification.error) {
         await Promise.allSettled([...new Set(mediaKeys)].map((key) => deleteR2Object(env, key)));
@@ -275,9 +301,11 @@ export async function onRequestPost({ request, env }) {
       media_key: mediaKey || null,
       media_type: mediaType,
       media_items: postType === "listing" ? mediaItems : [],
-      video_status: postType === "video" ? "uploaded" : "none",
-      original_media_url: postType === "video" ? mediaUrl : null,
-      original_media_key: postType === "video" ? mediaKey || null : null,
+      video_status: postType === "video" || listingHasVideo ? "uploaded" : "none",
+      original_media_url: postType === "video" ? mediaUrl : listingVideoMedia?.url || null,
+      original_media_key: postType === "video" ? mediaKey || null : listingVideoMedia?.key || null,
+      video_thumbnail_url: listingVideoMedia?.thumbnailUrl || null,
+      video_thumbnail_key: listingVideoMedia?.thumbnailKey || null,
     });
 
     await (async () => {

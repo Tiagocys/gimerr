@@ -50,18 +50,18 @@
         </div>
 
         <div class="game-stats" aria-label="Métricas do jogo">
-          <button class="stat-button" id="game-followers-button" type="button">
+          <button class="stat-button" id="game-followers-button" type="button" aria-controls="game-followers-panel" aria-expanded="false">
             <strong id="game-followers-count">0</strong>
             <span>seguidores</span>
           </button>
-          <div class="stat-button stat-static">
+          <button class="stat-button stat-static game-stat-link" id="game-posts-button" type="button">
             <strong id="game-posts-count">0</strong>
-            <span>publicações</span>
-          </div>
-          <div class="stat-button stat-static">
+            <span>anúncios</span>
+          </button>
+          <button class="stat-button stat-static game-stat-link" id="game-listings-button" type="button">
             <strong id="game-listings-count">0</strong>
             <span>anúncios</span>
-          </div>
+          </button>
         </div>
       </section>
 
@@ -69,22 +69,36 @@
         <section class="game-content" aria-label="Feed do jogo">
           <div class="profile-feed-header">
             <div>
-              <h2>Feed</h2>
-              <p id="game-feed-subtitle">Conteúdo publicado para este jogo.</p>
+              <h2>Marketplace</h2>
+              <p id="game-feed-subtitle">Anúncios publicados para este jogo.</p>
             </div>
           </div>
 
-          <section class="composer game-composer" id="game-composer" aria-label="Criar publicação no jogo">
-            <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação">
-              <button class="tab-button is-active" type="button" data-game-composer-mode="post">Post</button>
-              <button class="tab-button" type="button" data-game-composer-mode="listing">Anúncio</button>
+          <section class="composer game-composer" id="game-composer" aria-label="Criar anúncio no jogo">
+            <textarea id="game-composer-text" rows="4" maxlength="1200" placeholder="Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes."></textarea>
+            <div class="listing-video-upload">
+              <label class="text-button upload-button" for="game-composer-file">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M17 10.5V6c0-1.1-.9-2-2-2H5C3.9 4 3 4.9 3 6v12c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-4.5l4 4v-11l-4 4Z"/>
+                </svg>
+                Adicionar vídeo
+              </label>
+              <span>Opcional: 1 vídeo de até 3 minutos e 500 MB.</span>
+              <input id="game-composer-file" class="composer-video-input" type="file" accept="video/mp4,video/webm,video/quicktime">
             </div>
-            <textarea id="game-composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser."></textarea>
+            <p class="composer-step-helper" id="game-composer-video-helper" hidden></p>
+            <div class="composer-media" id="game-composer-media" hidden>
+              <div class="composer-media-summary">
+                <span id="game-composer-file-name"></span>
+                <div class="composer-media-previews" id="game-composer-media-previews"></div>
+              </div>
+              <button class="text-button" id="game-composer-clear-file" type="button">Remover</button>
+            </div>
             <div class="listing-composer-fields" id="game-listing-composer-fields" hidden>
-              <p class="composer-listing-helper" id="game-composer-listing-helper">Anúncios aceitam até 15 itens. Cada item precisa ter nome e preço. A imagem é opcional.</p>
               <label class="listing-currency-field" for="game-listing-currency">
-                <span>Moeda dos itens</span>
+                <span>Moeda do anúncio</span>
                 <select id="game-listing-currency">
+                  <option value="">Selecione uma moeda</option>
                   <option value="BRL">BRL - Real brasileiro</option>
                   <option value="USD">USD - Dólar americano</option>
                   <option value="EUR">EUR - Euro</option>
@@ -94,43 +108,27 @@
                 </select>
               </label>
               <div class="listing-items" id="game-listing-items"></div>
-              <button class="text-button listing-item-add" id="game-listing-item-add" type="button">Adicionar item</button>
-            </div>
-            <div class="composer-media" id="game-composer-media" hidden>
-              <div class="composer-media-summary">
-                <span id="game-composer-file-name"></span>
-                <div class="composer-media-previews" id="game-composer-media-previews"></div>
-              </div>
-              <button class="text-button" id="game-composer-clear-file" type="button">Remover</button>
+              <button class="text-button listing-item-add" id="game-listing-item-add" type="button">Adicione mais 14 itens</button>
             </div>
             <div class="composer-footer">
-              <span></span>
+              <p class="composer-submit-helper" id="game-composer-listing-helper" hidden></p>
               <div class="composer-actions">
-                <label class="text-button upload-button" for="game-composer-file">
-                  <svg aria-hidden="true" viewBox="0 0 24 24">
-                    <path d="M19 13v6H5v-6H3v8h18v-8h-2ZM13 5.8l3.6 3.6L18 8l-6-6-6 6 1.4 1.4L11 5.8V16h2V5.8Z"/>
-                  </svg>
-                  Arquivo
-                </label>
-                <input id="game-composer-file" type="file" accept="image/*,video/*">
-                <button class="primary-button" id="game-publish-post" type="button">Publicar</button>
+                <button class="primary-button" id="game-publish-post" type="button">Publicar anúncio</button>
               </div>
             </div>
             <p class="field-feedback" id="game-composer-feedback" role="status"></p>
           </section>
 
-          <div class="filter-bar" role="tablist" aria-label="Filtros do feed do jogo">
-            <button class="filter-chip is-active" type="button" data-game-feed-filter="all">Tudo</button>
-            <button class="filter-chip" type="button" data-game-feed-filter="listing">Anúncios</button>
-          </div>
-
           <div class="feed-list" id="game-feed-list"></div>
         </section>
 
-        <aside class="game-followers-panel" aria-labelledby="game-followers-title">
+        <aside class="game-followers-panel" id="game-followers-panel" aria-labelledby="game-followers-title">
           <div class="section-head">
             <h2 id="game-followers-title">Quem segue</h2>
-            <span id="game-followers-side-count">0</span>
+            <div class="game-followers-panel-actions">
+              <span id="game-followers-side-count">0</span>
+              <button class="ghost-icon game-followers-close" id="game-followers-close" type="button" aria-label="Fechar seguidores">x</button>
+            </div>
           </div>
           <div class="people-list" id="game-followers-list"></div>
         </aside>
@@ -144,6 +142,7 @@
   <script src="./navbar.js" defer></script>
   <script src="./video-player.js" defer></script>
   <script src="./media-lightbox.js" defer></script>
+  <script src="./share-modal.js" defer></script>
   <script src="./game.js" defer></script>
 </body>
 </html>

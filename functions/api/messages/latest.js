@@ -8,8 +8,24 @@ function cleanTimestamp(value) {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
-function toPublicMessage(row, profiles, viewerId) {
+function getReadByOthersAt(participants, viewerId) {
+  return (participants || [])
+    .filter((participant) => participant.profile_id !== viewerId && participant.last_read_at)
+    .map((participant) => new Date(participant.last_read_at))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime())[0]
+    ?.toISOString() || "";
+}
+
+function toPublicMessage(row, profiles, viewerId, readByOthersAt) {
   const author = toProfile(profiles.get(row.sender_id));
+  const readDate = readByOthersAt ? new Date(readByOthersAt) : null;
+  const createdAt = new Date(row.created_at);
+  const readByOthers = row.sender_id === viewerId
+    && readDate
+    && !Number.isNaN(readDate.getTime())
+    && !Number.isNaN(createdAt.getTime())
+    && readDate >= createdAt;
   return {
     id: row.id,
     conversationId: row.conversation_id,
@@ -18,6 +34,7 @@ function toPublicMessage(row, profiles, viewerId) {
     mediaType: row.media_type || "",
     createdAt: row.created_at,
     isOwn: row.sender_id === viewerId,
+    readByOthers,
     author,
   };
 }
@@ -44,7 +61,13 @@ export async function onRequestGet({ request, env }) {
     };
     if (after) params.created_at = `gt.${after}`;
 
-    const messages = await fetchRows(env, "conversation_messages", params);
+    const [messages, participants] = await Promise.all([
+      fetchRows(env, "conversation_messages", params),
+      fetchRows(env, "message_conversation_participants", {
+        select: "conversation_id,profile_id,last_read_at,created_at",
+        conversation_id: `eq.${conversationId}`,
+      }),
+    ]);
     const profileIds = messages.map((row) => row.sender_id).filter(Boolean);
     const profileRows = profileIds.length
       ? await fetchRows(env, "profiles", {
@@ -62,8 +85,11 @@ export async function onRequestGet({ request, env }) {
       ]);
     }
 
+    const readByOthersAt = getReadByOthersAt(participants, auth.user.id);
+
     return jsonResponse({
-      messages: messages.map((message) => toPublicMessage(message, profiles, auth.user.id)),
+      readByOthersAt,
+      messages: messages.map((message) => toPublicMessage(message, profiles, auth.user.id, readByOthersAt)),
     });
   } catch (error) {
     console.error("messages latest failed", error);

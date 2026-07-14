@@ -24,7 +24,7 @@ function requireWorker(request, env) {
 async function patchPost(env, postId, payload) {
   const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
   url.searchParams.set("id", `eq.${postId}`);
-  url.searchParams.set("post_type", "eq.video");
+  url.searchParams.set("status", "eq.active");
 
   const response = await fetch(url.toString(), {
     method: "PATCH",
@@ -34,6 +34,40 @@ async function patchPost(env, postId, payload) {
   const rows = await response.json().catch(() => []);
   if (!response.ok) throw new Error(rows.message || "Não foi possível atualizar vídeo.");
   return rows[0] || null;
+}
+
+async function fetchPost(env, postId) {
+  const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
+  url.searchParams.set("select", "id,post_type,status,media_items,video_thumbnail_key");
+  url.searchParams.set("id", `eq.${postId}`);
+  url.searchParams.set("status", "eq.active");
+  url.searchParams.set("limit", "1");
+
+  const response = await fetch(url.toString(), {
+    headers: getServiceHeaders(env),
+  });
+  const rows = await response.json().catch(() => []);
+  if (!response.ok) throw new Error(rows.message || "Não foi possível carregar vídeo.");
+  return rows[0] || null;
+}
+
+function replaceReadyVideoMediaItems(items, originalKey, readyKey, readyUrl, readyType) {
+  if (!Array.isArray(items) || !items.length || !originalKey) return null;
+  let changed = false;
+  const nextItems = items.map((item) => {
+    const isTargetVideo = String(item?.mediaType || "").startsWith("video/")
+      && (item?.key === originalKey || item?.mediaRole === "listingVideo");
+    if (!isTargetVideo) return item;
+    changed = true;
+    return {
+      ...item,
+      url: readyUrl,
+      key: readyKey,
+      mediaType: readyType,
+      mediaRole: item?.mediaRole || "listingVideo",
+    };
+  });
+  return changed ? nextItems : null;
 }
 
 export async function onRequestPost({ request, env }) {
@@ -59,6 +93,7 @@ export async function onRequestPost({ request, env }) {
       if (!thumbnailKey.startsWith("videos/thumbnails/") || !thumbnailUrl) {
         return jsonResponse({ error: "Capa do vídeo inválida." }, { status: 400 });
       }
+      const currentPost = await fetchPost(env, postId);
       const post = await patchPost(env, postId, {
         video_thumbnail_url: thumbnailUrl,
         video_thumbnail_key: thumbnailKey,
@@ -66,6 +101,10 @@ export async function onRequestPost({ request, env }) {
       if (!post) {
         await deleteR2Object(env, thumbnailKey).catch(() => {});
         return jsonResponse({ post: null, cancelled: true });
+      }
+      const previousThumbnailKey = cleanText(currentPost?.video_thumbnail_key, 500);
+      if (previousThumbnailKey && previousThumbnailKey !== thumbnailKey && previousThumbnailKey.startsWith("videos/thumbnails/")) {
+        await deleteR2Object(env, previousThumbnailKey).catch(() => {});
       }
       return jsonResponse({ post });
     }
@@ -90,6 +129,22 @@ export async function onRequestPost({ request, env }) {
       return jsonResponse({ error: "Vídeo final inválido." }, { status: 400 });
     }
 
+    const currentPost = await fetchPost(env, postId);
+    if (!currentPost) {
+      await Promise.allSettled([
+        deleteR2Object(env, readyKey),
+        thumbnailKey.startsWith("videos/thumbnails/") ? deleteR2Object(env, thumbnailKey) : Promise.resolve(),
+      ]);
+      return jsonResponse({ post: null, cancelled: true });
+    }
+    const nextMediaItems = replaceReadyVideoMediaItems(
+      currentPost.media_items,
+      originalKey,
+      readyKey,
+      readyUrl,
+      readyType,
+    );
+
     const post = await patchPost(env, postId, {
       video_status: "ready",
       media_url: readyUrl,
@@ -97,6 +152,7 @@ export async function onRequestPost({ request, env }) {
       media_type: readyType,
       ready_media_url: readyUrl,
       ready_media_key: readyKey,
+      ...(nextMediaItems ? { media_items: nextMediaItems } : {}),
       ...(thumbnailKey.startsWith("videos/thumbnails/") && thumbnailUrl ? {
         video_thumbnail_url: thumbnailUrl,
         video_thumbnail_key: thumbnailKey,

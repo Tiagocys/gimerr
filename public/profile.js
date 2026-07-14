@@ -743,8 +743,10 @@ async function sharePost(postId) {
     ? `Veja este vídeo no Gimerr`
     : `Veja este post no Gimerr`;
 
-  if (navigator.share) {
-    await navigator.share({
+  if (window.GimerrShare?.openPostShare) {
+    await window.GimerrShare.openPostShare({
+      postId,
+      post,
       title,
       text: `Publicado em ${post?.gameName || "Gimerr"}`,
       url,

@@ -3,6 +3,7 @@
   const accountMenu = document.querySelector("[data-account-menu]");
   const topActions = document.querySelector(".top-actions");
   if (!authLink || !accountMenu || !topActions || !window.GimerrAuth) return;
+  const topbar = topActions.closest(".topbar");
 
   const state = {
     open: false,
@@ -65,6 +66,28 @@
     accountMenu.querySelector(".account-avatar-button")?.setAttribute("aria-expanded", String(isOpen));
   }
 
+  function setTopbarLoading(isLoading) {
+    topbar?.classList.toggle("is-loading", Boolean(isLoading));
+    topbar?.setAttribute("aria-busy", String(Boolean(isLoading)));
+  }
+
+  function ensureTopbarActionLoader() {
+    let loader = topActions.querySelector("[data-topbar-action-loader]");
+    if (loader) return loader;
+
+    loader = document.createElement("div");
+    loader.className = "topbar-action-loader";
+    loader.dataset.topbarActionLoader = "";
+    loader.setAttribute("aria-hidden", "true");
+    loader.innerHTML = `
+      <span></span>
+      <span></span>
+      <span></span>
+    `;
+    topActions.insertBefore(loader, authLink);
+    return loader;
+  }
+
   function ensureNotificationMenu() {
     let root = document.querySelector("[data-notifications-menu]");
     if (root) return root;
@@ -94,6 +117,42 @@
     `;
     topActions.insertBefore(root, authLink);
     return root;
+  }
+
+  function ensureCreateListingButton() {
+    let button = topActions.querySelector("[data-create-listing-button]");
+    const hasLocalComposer = Boolean(document.querySelector("#composer"));
+
+    if (!button) {
+      button = document.createElement("button");
+      button.className = "primary-button navbar-create-listing";
+      button.type = "button";
+      button.dataset.createListingButton = "";
+      button.textContent = "+ Criar anúncio";
+      topActions.insertBefore(button, ensureMessagesLink());
+    }
+
+    if (hasLocalComposer) {
+      button.id = button.id || "open-composer";
+      button.setAttribute("aria-controls", "composer");
+      button.setAttribute("aria-expanded", "false");
+      return button;
+    }
+
+    button.removeAttribute("id");
+    button.removeAttribute("aria-controls");
+    button.removeAttribute("aria-expanded");
+
+    if (button.dataset.createListingBound !== "true") {
+      button.dataset.createListingBound = "true";
+      button.addEventListener("click", () => {
+        const url = new URL("/", window.location.origin);
+        url.searchParams.set("openComposer", "1");
+        window.location.assign(url.toString());
+      });
+    }
+
+    return button;
   }
 
   function ensureMessagesLink() {
@@ -375,7 +434,10 @@
   }
 
   async function init() {
+    setTopbarLoading(true);
     try {
+      ensureCreateListingButton();
+      ensureTopbarActionLoader();
       const client = await window.GimerrAuth.getClient();
       const { data } = await window.GimerrAuth.getSession();
       state.session = data.session;
@@ -403,6 +465,8 @@
       accountMenu.hidden = true;
       ensureMessagesLink().hidden = true;
       ensureNotificationMenu().hidden = true;
+    } finally {
+      setTopbarLoading(false);
     }
   }
 
@@ -449,5 +513,8 @@
     }
   });
 
+  setTopbarLoading(true);
+  ensureCreateListingButton();
+  ensureTopbarActionLoader();
   init();
 })();

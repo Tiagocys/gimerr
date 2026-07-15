@@ -444,7 +444,7 @@ async function loadProfileStats(client, profileId, viewerId) {
 async function loadProfilePosts(client, profileId) {
   const { data, error, count } = await client
     .from("public_feed_posts")
-    .select("id, profile_id, game_igdb_id, post_type, body, media_url, media_type, media_items, video_status, video_thumbnail_url, processing_error, comment_count, video_view_count, created_at, game_name, game_slug, game_cover_url", { count: "exact" })
+    .select("id, profile_id, game_igdb_id, post_type, body, media_url, media_type, media_items, video_status, video_thumbnail_url, processing_error, comment_count, video_view_count, listing_view_count, created_at, game_name, game_slug, game_cover_url", { count: "exact" })
     .eq("profile_id", profileId)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -463,6 +463,7 @@ async function loadProfilePosts(client, profileId) {
     processingError: post.processing_error || "",
     commentCount: Number(post.comment_count || 0),
     videoViewCount: Number(post.video_view_count || 0),
+    listingViewCount: Number(post.listing_view_count || 0),
     createdAt: post.created_at,
     gameId: post.game_igdb_id,
     gameName: post.game_name || "Game",

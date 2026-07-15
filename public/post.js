@@ -2,6 +2,8 @@
   const state = {
     session: null,
     post: null,
+    listingSellerDetails: null,
+    listingSellerCache: new Map(),
     comments: [],
     commentsError: "",
     commentSubmitting: false,
@@ -303,6 +305,156 @@
     }).format(date);
   }
 
+  function detectListingCurrency(value) {
+    const text = String(value || "");
+    if (text.includes("US$")) return "USD";
+    if (text.includes("€")) return "EUR";
+    if (text.includes("JP¥")) return "JPY";
+    if (text.includes("£")) return "GBP";
+    if (text.includes("CN¥")) return "CNY";
+    if (text.includes("R$")) return "BRL";
+    return "";
+  }
+
+  function parseListingPriceInput(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    const numeric = text
+      .replace(/[^\d.,-]/g, "")
+      .replace(/\./g, "")
+      .replace(",", ".");
+    const number = Number(numeric);
+    return Number.isFinite(number) && number >= 0 ? String(number) : "";
+  }
+
+  function parseListingBody(body, mediaItems = []) {
+    const text = String(body || "");
+    const marker = "\n\nItens:\n";
+    const markerIndex = text.indexOf(marker);
+    const description = markerIndex >= 0 ? text.slice(0, markerIndex) : "";
+    const itemsText = markerIndex >= 0 ? text.slice(markerIndex + marker.length) : text.replace(/^Itens:\n/i, "");
+    const lines = itemsText.split("\n").map((line) => line.trim()).filter(Boolean);
+    let detectedCurrency = "";
+    const listingImages = mediaItems.filter((item) => String(item?.mediaType || "").startsWith("image/"));
+    const mediaByPosition = new Map(listingImages
+      .filter((item) => Number.isInteger(Number(item?.position)))
+      .map((item) => [Number(item.position), item]));
+    const mediaByName = new Map(listingImages
+      .filter((item) => item?.itemName)
+      .map((item) => [String(item.itemName).toLowerCase(), item]));
+    const getMediaForLine = (name, index) => (
+      mediaByPosition.get(index)
+      || mediaByName.get(String(name || "").toLowerCase())
+      || null
+    );
+    const items = lines.map((line, index) => {
+      const [namePart, ...priceParts] = line.split(/\s+-\s+/);
+      const mediaItem = getMediaForLine(namePart, index);
+      const priceLabel = priceParts.join(" - ") || mediaItem?.priceLabel || "";
+      if (!detectedCurrency) detectedCurrency = detectListingCurrency(priceLabel);
+      return {
+        name: namePart || mediaItem?.itemName || "",
+        price: parseListingPriceInput(priceLabel),
+        priceLabel,
+        mediaItem,
+        previewUrl: mediaItem?.url || "",
+      };
+    });
+    return {
+      description,
+      currency: detectedCurrency || "BRL",
+      items,
+    };
+  }
+
+  function getListingCardData(post) {
+    const rawMediaItems = Array.isArray(post?.mediaItems) ? post.mediaItems : getPostMediaItems(post);
+    const parsed = parseListingBody(post?.body || "", rawMediaItems);
+    const itemCount = parsed.items.filter((item) => item.name || item.price || item.priceLabel || item.mediaItem || item.previewUrl).length;
+    return { ...parsed, itemCount };
+  }
+
+  function formatListingItemCount(count) {
+    const value = Number(count || 0);
+    if (value === 1) return "1 item";
+    return `${new Intl.NumberFormat("pt-BR").format(value)} itens`;
+  }
+
+  function formatCountLabel(value, singular, plural) {
+    const count = Number(value || 0);
+    return `${new Intl.NumberFormat("pt-BR").format(count)} ${count === 1 ? singular : plural}`;
+  }
+
+  function getWhatsappUrl(phone) {
+    const digits = String(phone || "").replace(/\D/g, "");
+    return digits ? `https://wa.me/${digits}` : "";
+  }
+
+  function getPhoneLabel(phone) {
+    return String(phone || "").replace(/^\+/, "+");
+  }
+
+  function getPlatformMeta(platform) {
+    const id = String(platform || "").trim().toLowerCase();
+    if (id === "discord") return { id, label: "Discord", icon: "./assets/discord.svg" };
+    if (id === "twitch") return { id, label: "Twitch", icon: "./assets/twitch.svg" };
+    return { id: id || "platform", label: platform || "Plataforma", icon: "" };
+  }
+
+  function renderSellerContacts(details) {
+    const profile = details?.profile || {};
+    const links = Array.isArray(details?.platformLinks) ? details.platformLinks : [];
+    const contactItems = [];
+    if (profile.phone_e164) {
+      contactItems.push(`<a href="tel:${escapeHtml(profile.phone_e164)}">Telefone: ${escapeHtml(getPhoneLabel(profile.phone_e164))}</a>`);
+      if (profile.phone_contact_whatsapp) {
+        const whatsappUrl = getWhatsappUrl(profile.phone_e164);
+        if (whatsappUrl) {
+          contactItems.push(`
+            <a class="info-pill contact-pill whatsapp-contact-pill" href="${escapeHtml(whatsappUrl)}" target="_blank" rel="noopener">
+              <img src="./assets/whatsapp.svg" alt="">
+              WhatsApp
+            </a>
+          `);
+        }
+      }
+      if (profile.phone_contact_telegram) {
+        const phoneDigits = String(profile.phone_e164 || "").replace(/\D/g, "");
+        if (phoneDigits) {
+          contactItems.push(`
+            <a class="info-pill contact-pill telegram-contact-button" href="tg://resolve?phone=${escapeHtml(phoneDigits)}">
+              <img src="./assets/telegram.svg" alt="">
+              Telegram
+            </a>
+          `);
+        }
+      }
+    }
+    links.forEach((link) => {
+      const platformMeta = getPlatformMeta(link.platform);
+      const handle = link.handle || platformMeta.label;
+      const label = `${platformMeta.label}${link.handle ? `: ${link.handle}` : ""}`;
+      if (link.profile_url) {
+        contactItems.push(`
+          <a class="info-pill platform-pill platform-pill-${escapeHtml(platformMeta.id)}" href="${escapeHtml(link.profile_url)}" target="_blank" rel="noopener" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+            ${platformMeta.icon ? `<img src="${escapeHtml(platformMeta.icon)}" alt="">` : ""}
+            <span>${escapeHtml(handle)}</span>
+          </a>
+        `);
+      } else {
+        contactItems.push(`
+          <span class="info-pill platform-pill platform-pill-${escapeHtml(platformMeta.id)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+            ${platformMeta.icon ? `<img src="${escapeHtml(platformMeta.icon)}" alt="">` : ""}
+            <span>${escapeHtml(handle)}</span>
+          </span>
+        `);
+      }
+    });
+    return contactItems.length
+      ? contactItems.map((item) => `<li>${item}</li>`).join("")
+      : `<li><span>Sem contatos públicos.</span></li>`;
+  }
+
   function closePostMenus(exceptMenu = null) {
     document.querySelectorAll("[data-post-menu]").forEach((menu) => {
       if (exceptMenu && menu === exceptMenu) return;
@@ -332,10 +484,97 @@
           <span aria-hidden="true">&#8942;</span>
         </button>
         <div class="post-menu-popover" hidden>
-          <button type="button" data-post-share data-post-id="${postId}">Compartilhar</button>
           ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
           ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Apagar post</button>` : ""}
         </div>
+      </div>
+    `;
+  }
+
+  function renderListingDetail(post, sellerDetails = null) {
+    const listingData = getListingCardData(post);
+    const author = post.author || {};
+    const sellerProfile = sellerDetails?.profile || {};
+    const stats = sellerDetails?.stats || {};
+    const sellerName = sellerProfile.display_name || author.displayName || author.username || "Vendedor Gimerr";
+    const sellerUsername = sellerProfile.username || author.username || "";
+    const sellerAvatar = sellerProfile.avatar_url || author.avatarUrl || "./assets/avatar.svg";
+    const canMessageSeller = author.id && author.id !== state.session?.user?.id;
+    const mediaItems = getPostMediaItems(post);
+    const listingVideo = mediaItems.find((item) => String(item?.mediaType || "").startsWith("video/"));
+    const items = listingData.items.filter((item) => item.name || item.price || item.priceLabel || item.mediaItem || item.previewUrl);
+    const galleryItems = items
+      .filter((item) => item.previewUrl)
+      .map((item, index) => ({
+        url: item.previewUrl,
+        alt: item.name ? `Imagem do item ${item.name}` : `Imagem do item ${index + 1}`,
+      }));
+    const itemList = items.map((item) => {
+      const galleryIndex = item.previewUrl
+        ? galleryItems.findIndex((galleryItem) => galleryItem.url === item.previewUrl)
+        : -1;
+      const imageAlt = item.name ? `Imagem do item ${item.name}` : "Imagem do item";
+      return `
+        <article class="listing-detail-item">
+          ${item.previewUrl ? `
+            <button class="listing-detail-item-media" type="button" data-image-src="${escapeHtml(item.previewUrl)}" data-image-index="${Math.max(0, galleryIndex)}" data-image-items="${escapeHtml(JSON.stringify(galleryItems))}" ${renderImageLightboxAttrs(post, imageAlt)} aria-label="Ampliar imagem do item">
+              <img src="${escapeHtml(item.previewUrl)}" alt="">
+            </button>
+          ` : `
+            <div class="listing-detail-item-media">
+              <span>Sem imagem</span>
+            </div>
+          `}
+          <div>
+            <strong>${escapeHtml(item.name || "Item")}</strong>
+            ${item.priceLabel ? `<span>${escapeHtml(item.priceLabel)}</span>` : ""}
+          </div>
+        </article>
+      `;
+    }).join("");
+
+    return `
+      <div class="listing-detail-grid post-listing-detail">
+        <section class="listing-detail-main">
+          <div class="listing-detail-actions">
+            <button class="post-action-button" type="button" data-post-share data-post-id="${escapeHtml(post.id)}">Compartilhar</button>
+            ${renderPostMenu(post)}
+          </div>
+          <div>
+            <a class="channel-line" href="${getGameUrl(post.game)}">
+              <span class="channel-game-logo" aria-hidden="true">
+                <img src="${escapeHtml(post.game?.coverUrl || "./assets/avatar.svg")}" alt="">
+              </span>
+              <span>Em ${escapeHtml(post.game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
+            </a>
+            <h1 id="listing-detail-title">${escapeHtml(formatListingItemCount(listingData.itemCount))}</h1>
+            ${listingData.description ? `<p class="listing-detail-description">${escapeHtml(listingData.description)}</p>` : ""}
+          </div>
+          ${listingVideo ? renderVideoPoster(post, listingVideo) : ""}
+          <div class="listing-detail-items">
+            ${itemList || `<p class="empty-state">Nenhum item informado.</p>`}
+          </div>
+        </section>
+        <aside class="listing-detail-seller">
+          <a class="listing-seller-head" href="${getProfileUrl({ id: author.id, username: sellerUsername })}">
+            <img src="${escapeHtml(sellerAvatar)}" alt="">
+            <span>
+              <strong>${escapeHtml(sellerName)}</strong>
+              ${sellerUsername ? `<small>@${escapeHtml(sellerUsername)}</small>` : ""}
+            </span>
+          </a>
+          <div class="listing-seller-stats">
+            <span>${escapeHtml(formatCountLabel(stats.followers_count, "seguidor", "seguidores"))}</span>
+            <span>${escapeHtml(formatCountLabel(stats.recommendations_count, "recomendação", "recomendações"))}</span>
+          </div>
+          ${canMessageSeller ? `
+            <a class="primary-button listing-message-button" href="./messages?listingPostId=${encodeURIComponent(post.id)}">Enviar mensagem</a>
+          ` : ""}
+          <div class="listing-seller-contact">
+            <strong>Contato</strong>
+            <ul>${renderSellerContacts(sellerDetails)}</ul>
+          </div>
+        </aside>
       </div>
     `;
   }
@@ -361,7 +600,9 @@
     const post = state.post;
     const title = post?.type === "video"
       ? "Veja este vídeo no Gimerr"
-      : "Veja este post no Gimerr";
+      : post?.type === "listing"
+        ? "Veja este anúncio no Gimerr"
+        : "Veja este post no Gimerr";
     const url = window.location.href;
 
     if (window.GimerrShare?.openPostShare) {
@@ -436,8 +677,15 @@
     const authorHandle = author.username ? `@${author.username}` : "@gimerr";
     const media = renderPostMedia(post);
 
-    document.title = `${authorName} | Gimerr`;
+    document.title = `${post.type === "listing" ? "Anúncio" : authorName} | Gimerr`;
     els.layout.classList.remove("is-loading");
+    els.layout.classList.toggle("is-listing-detail", post.type === "listing");
+    if (post.type === "listing") {
+      els.card.innerHTML = renderListingDetail(post, state.listingSellerDetails);
+      window.GimerrVideoPlayer?.prepare(els.card);
+      return;
+    }
+
     els.card.innerHTML = `
       <article class="post-card post-detail-post">
         ${media}
@@ -641,6 +889,55 @@
       .filter(Boolean);
   }
 
+  async function loadListingSellerDetails(authorId) {
+    if (!authorId || !window.GimerrAuth) return null;
+    if (state.listingSellerCache.has(authorId)) return state.listingSellerCache.get(authorId);
+    const client = await window.GimerrAuth.getClient();
+    const [profileResult, statsResult, linksResult] = await Promise.all([
+      client
+        .from("public_profiles")
+        .select("id, display_name, username, avatar_url, phone_e164, phone_contact_whatsapp, phone_contact_telegram")
+        .eq("id", authorId)
+        .maybeSingle(),
+      client
+        .from("public_profile_stats")
+        .select("profile_id, followers_count, recommendations_count")
+        .eq("profile_id", authorId)
+        .maybeSingle(),
+      client
+        .from("public_profile_platform_links")
+        .select("platform, handle, profile_url")
+        .eq("profile_id", authorId),
+    ]);
+    if (profileResult.error) throw profileResult.error;
+    if (statsResult.error) throw statsResult.error;
+    if (linksResult.error) throw linksResult.error;
+    const details = {
+      profile: profileResult.data || {},
+      stats: statsResult.data || {},
+      platformLinks: linksResult.data || [],
+    };
+    state.listingSellerCache.set(authorId, details);
+    return details;
+  }
+
+  async function recordListingView(postId) {
+    if (!postId || !state.session?.access_token) return;
+    try {
+      await fetch("/api/posts/listing-view", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${state.session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ postId }),
+      });
+    } catch (error) {
+      console.warn("Não foi possível registrar visualização do anúncio.", error);
+    }
+  }
+
   async function loadPost() {
     const postId = getPostId();
     if (!postId) {
@@ -658,7 +955,13 @@
     }
 
     state.post = payload.post;
-    if (state.post?.type !== "listing") {
+    if (state.post?.type === "listing") {
+      await recordListingView(postId);
+      state.listingSellerDetails = await loadListingSellerDetails(state.post.author?.id).catch((error) => {
+        console.warn("Não foi possível carregar detalhes do vendedor.", error);
+        return null;
+      });
+    } else {
       await loadComments(postId).catch((error) => {
         console.warn("Não foi possível carregar comentários.", error);
         state.commentsError = error.message || "Não foi possível carregar comentários.";

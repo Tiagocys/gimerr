@@ -22,6 +22,30 @@
     return url.toString();
   }
 
+  function getListingDescription(post) {
+    if (post?.type !== "listing") return "";
+    const text = String(post?.body || "").trim();
+    if (!text) return "";
+    const marker = "\n\nItens:\n";
+    const markerIndex = text.indexOf(marker);
+    return (markerIndex >= 0 ? text.slice(0, markerIndex) : "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function createQrMarkup(url) {
+    if (!window.qrcode || !url) return "";
+    try {
+      const qr = window.qrcode(0, "M");
+      qr.addData(url);
+      qr.make();
+      return qr.createSvgTag(6, 2);
+    } catch (error) {
+      console.warn("Não foi possível gerar QR Code.", error);
+      return "";
+    }
+  }
+
   async function getSession() {
     if (!window.GimerrAuth) return null;
     const { data } = await window.GimerrAuth.getSession();
@@ -116,6 +140,11 @@
           </div>
           <button class="ghost-icon share-modal-close" type="button" data-share-close aria-label="Fechar">×</button>
         </div>
+        <div class="share-qr-card" data-share-qr-card hidden>
+          <p class="share-qr-description" data-share-qr-description hidden></p>
+          <div class="share-qr-frame" data-share-qr-frame></div>
+          <small>Escaneie para abrir este anúncio.</small>
+        </div>
         <button class="share-copy-button" type="button" data-share-copy>
           <span>Copiar link</span>
         </button>
@@ -144,6 +173,11 @@
       modal,
       list: modal.querySelector("[data-share-suggestions]"),
       feedback: modal.querySelector("[data-share-feedback]"),
+      title: modal.querySelector("#share-modal-title"),
+      copy: modal.querySelector(".modal-head p"),
+      qrCard: modal.querySelector("[data-share-qr-card]"),
+      qrDescription: modal.querySelector("[data-share-qr-description]"),
+      qrFrame: modal.querySelector("[data-share-qr-frame]"),
     };
   }
 
@@ -178,6 +212,35 @@
         <small>Enviar</small>
       </button>
     `).join("");
+  }
+
+  function renderQrCard() {
+    const { title, copy, qrCard, qrDescription, qrFrame } = getModalEls();
+    const post = state.post || {};
+    const isListing = post.type === "listing";
+    if (title) title.textContent = isListing ? "Compartilhar anúncio" : "Compartilhar post";
+    if (copy) {
+      copy.textContent = isListing
+        ? "Envie por mensagem, copie o link ou mostre o QR Code."
+        : "Envie para alguém que você segue ou copie o link.";
+    }
+    if (!qrCard || !qrFrame) return;
+
+    const qrMarkup = isListing ? createQrMarkup(post.url) : "";
+    qrCard.hidden = !qrMarkup;
+    qrFrame.innerHTML = qrMarkup
+      ? `
+        <div class="share-qr-code">
+          ${qrMarkup}
+          <img src="./assets/logo-square.svg" alt="Gimerr">
+        </div>
+      `
+      : "";
+
+    if (qrDescription) {
+      qrDescription.textContent = post.description || "";
+      qrDescription.hidden = !post.description;
+    }
   }
 
   function closeShareModal() {
@@ -272,16 +335,20 @@
     const postId = options.postId || options.id || "";
     const gameName = options.gameName || options.post?.game?.name || options.post?.gameName || "Gimerr";
     const isVideo = options.post?.type === "video" || options.type === "video";
+    const isListing = options.post?.type === "listing" || options.type === "listing";
     state.post = {
       id: postId,
       url: getPostUrl(postId, options.url),
-      title: options.title || (isVideo ? "Veja este vídeo no Gimerr" : "Veja este post no Gimerr"),
+      type: options.post?.type || options.type || "",
+      title: options.title || (isVideo ? "Veja este vídeo no Gimerr" : isListing ? "Veja este anúncio no Gimerr" : "Veja este post no Gimerr"),
       text: options.text || `Publicado em ${gameName}`,
+      description: getListingDescription(options.post),
     };
 
     const modal = ensureModal();
     modal.hidden = false;
     setFeedback("");
+    renderQrCard();
     renderSuggestions([], { loading: true });
 
     try {

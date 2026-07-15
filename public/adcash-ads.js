@@ -53,10 +53,10 @@
     panel.dataset.adState = state;
     panel.classList.toggle("has-external-ad", state === "filled");
     slot.setAttribute("aria-busy", state === "loading" ? "true" : "false");
-    slot.hidden = state === "fallback";
+    slot.hidden = state !== "filled";
     slot.classList.toggle("is-filled", state === "filled");
     slot.classList.toggle("is-loading", state === "loading");
-    if (fallback) fallback.hidden = state !== "fallback";
+    if (fallback) fallback.hidden = state === "filled";
   }
 
   function waitForSlotFill(slot, timeoutMs = 6200) {

@@ -85,8 +85,21 @@ function getFirstMediaItem(row) {
   return items.find((item) => item?.url) || null;
 }
 
+function getFirstImageMediaItem(row) {
+  const items = Array.isArray(row?.media_items) ? row.media_items : [];
+  return items.find((item) => item?.url && String(item?.mediaType || "").startsWith("image/")) || null;
+}
+
 function getPostImageUrl(row, origin) {
   const firstMedia = getFirstMediaItem(row);
+  const firstImage = getFirstImageMediaItem(row);
+  if (row?.post_type === "listing") {
+    const listingImageUrl = String(row?.media_type || "").startsWith("image/")
+      ? row.media_url
+      : firstImage?.url;
+    return absoluteUrl(listingImageUrl || row.game_cover_url || "/assets/logo.png", origin);
+  }
+
   const isVideo = String(row?.media_type || firstMedia?.mediaType || "").startsWith("video/")
     || row?.post_type === "video";
 

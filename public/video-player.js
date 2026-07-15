@@ -182,8 +182,15 @@
     return options;
   }
 
+  function prewarmVideoPlayer() {
+    loadFluidPlayer().catch(() => {});
+    getAdsConfig().catch(() => {});
+  }
+
   async function initializeFluidVideo(video) {
-    if (!video || video.dataset.fluidPlayerState) return;
+    if (!video) return null;
+    if (video._gimerrFluidPlayer) return video._gimerrFluidPlayer;
+    if (video.dataset.fluidPlayerState === "loading") return null;
     video.dataset.fluidPlayerState = "loading";
 
     if (!video.id) {
@@ -199,19 +206,38 @@
       if (!fluidPlayer || !video.isConnected) return;
       video._gimerrFluidPlayer = fluidPlayer(video, getFluidOptions(adsConfig));
       video.dataset.fluidPlayerState = "ready";
+      return video._gimerrFluidPlayer;
     } catch (error) {
       video.dataset.fluidPlayerState = "fallback";
       video.controls = true;
       console.warn("Fluid Player indisponível. Usando player nativo.", error);
+      return null;
     }
   }
 
   async function initializeVideo(video) {
-    if (!video || video.dataset.videoState === "ready") return;
+    if (!video) return null;
+    if (video.dataset.videoState === "ready") return video._gimerrFluidPlayer || null;
     if (!video.isConnected) return;
     ensureVideoSource(video);
     video.dataset.videoState = "ready";
-    await initializeFluidVideo(video);
+    return initializeFluidVideo(video);
+  }
+
+  function startVideoPlayback(video, player) {
+    if (!video?.isConnected) return;
+    const fluidPlayer = player || video._gimerrFluidPlayer;
+    if (fluidPlayer && typeof fluidPlayer.play === "function") {
+      try {
+        const result = fluidPlayer.play();
+        if (result?.catch) result.catch(() => {});
+        return;
+      } catch {}
+    }
+    try {
+      const result = video.play();
+      if (result?.catch) result.catch(() => {});
+    } catch {}
   }
 
   function bindLazyInitialization(video) {
@@ -224,6 +250,9 @@
   function prepare(root = document) {
     const scope = root instanceof Element || root instanceof Document ? root : document;
     scope.querySelectorAll("video[data-fluid-video]").forEach(bindLazyInitialization);
+    if (scope.querySelector("[data-video-src]")) {
+      window.setTimeout(prewarmVideoPlayer, 0);
+    }
   }
 
   async function loadVideoFromPoster(button) {
@@ -250,7 +279,8 @@
 
     button.replaceWith(video);
     recordVideoView(video);
-    await initializeVideo(video);
+    const player = await initializeVideo(video);
+    startVideoPlayback(video, player);
   }
 
   function stopVideo(video) {
@@ -287,6 +317,7 @@
   document.addEventListener("pointerdown", (event) => {
     const posterButton = event.target instanceof Element ? event.target.closest("[data-video-src]") : null;
     if (posterButton) {
+      event.preventDefault();
       loadVideoFromPoster(posterButton);
       return;
     }
@@ -299,7 +330,10 @@
 
   document.addEventListener("click", (event) => {
     const posterButton = event.target instanceof Element ? event.target.closest("[data-video-src]") : null;
-    if (posterButton) loadVideoFromPoster(posterButton);
+    if (posterButton) {
+      event.preventDefault();
+      loadVideoFromPoster(posterButton);
+    }
   });
 
   document.addEventListener("focusin", (event) => {

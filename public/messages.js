@@ -259,6 +259,14 @@
     return fallbackUrl ? [{ url: fallbackUrl, mediaType: post?.mediaType || "video/mp4" }] : [];
   }
 
+  function isImageMediaItem(item) {
+    return String(item?.mediaType || "").startsWith("image/");
+  }
+
+  function isVideoMediaItem(item) {
+    return String(item?.mediaType || "").startsWith("video/");
+  }
+
   function getPostPreviewTitle(post) {
     const gameName = post?.game?.name || "Gimerr";
     if (post?.type === "video") return `Vídeo em ${gameName}`;
@@ -286,9 +294,16 @@
     const body = stripSharedPostUrls(post.body || "");
     const items = getPostMediaItems(post);
     const [firstItem] = items;
-    const isVideo = post.type === "video" || String(firstItem?.mediaType || post.mediaType || "").startsWith("video/");
+    const isListing = post.type === "listing";
+    const firstListingImage = isListing ? items.find(isImageMediaItem) : null;
+    const isVideo = !isListing && (post.type === "video" || isVideoMediaItem(firstItem) || String(post.mediaType || "").startsWith("video/"));
     const videoSrc = isVideo ? (post.readyMediaUrl || firstItem?.url || post.mediaUrl || post.originalMediaUrl || "") : "";
-    const poster = post.videoThumbnailUrl || (!isVideo ? firstItem?.url : "") || post.game?.coverUrl || "";
+    const imageUrl = isListing
+      ? firstListingImage?.url || post.game?.coverUrl || ""
+      : (!isVideo && firstItem?.url ? firstItem.url : "");
+    const poster = isVideo
+      ? post.videoThumbnailUrl || post.game?.coverUrl || ""
+      : imageUrl;
     const media = isVideo && videoSrc
       ? `
         <button class="video-lazy-button media-frame message-post-video" type="button" data-video-post-id="${escapeHtml(post.id)}" data-video-src="${escapeHtml(videoSrc)}" data-video-type="${escapeHtml(firstItem?.mediaType || post.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo compartilhado">

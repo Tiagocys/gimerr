@@ -129,6 +129,16 @@ function redirectLegacySharedPostUrl() {
   return true;
 }
 
+function cleanRouteUuid(value) {
+  const text = String(value || "").trim();
+  return text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || "";
+}
+
+function getListingRoutePostId() {
+  const params = new URLSearchParams(window.location.search);
+  return cleanRouteUuid(params.get("listing") || params.get("listingPostId") || "");
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -1339,14 +1349,65 @@ function formatVideoViewCount(value) {
   return count === 1 ? "1 visualização" : `${formatted} visualizações`;
 }
 
+function formatListingViewCount(value) {
+  const count = Number(value || 0);
+  if (count >= 1000) {
+    const compact = Math.floor(count / 1000);
+    return `${new Intl.NumberFormat("pt-BR").format(compact)}k`;
+  }
+  return new Intl.NumberFormat("pt-BR").format(count);
+}
+
+function formatListingViewBadge(value) {
+  const count = Number(value || 0);
+  return `${formatListingViewCount(count)} ${count === 1 ? "visualização" : "visualizações"}`;
+}
+
+function formatListingRelativeTime(value) {
+  const formatted = formatRelativeTime(value);
+  return formatted === "agora" ? "Agora" : formatted;
+}
+
+async function recordListingView(postId) {
+  if (!postId || !state.session?.access_token) return;
+  try {
+    const headers = {
+      accept: "application/json",
+      "content-type": "application/json",
+      authorization: `Bearer ${state.session.access_token}`,
+    };
+    const response = await fetch("/api/posts/listing-view", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        postId,
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível registrar visualização.");
+    const listingViewCount = Number(payload.listingViewCount || 0);
+    posts = posts.map((post) => (
+      String(post.id) === String(postId)
+        ? { ...post, listingViewCount }
+        : post
+    ));
+    document.querySelectorAll("[data-listing-view-count]").forEach((element) => {
+      if (String(element.dataset.postId || "") === String(postId)) {
+        element.textContent = formatListingViewBadge(listingViewCount);
+      }
+    });
+  } catch (error) {
+    console.warn("Não foi possível registrar visualização do anúncio.", error);
+  }
+}
+
 function renderPostActions(post) {
   const postId = escapeHtml(post.id);
   if (isMarketplacePost(post)) {
     return `
-      <div class="post-action-bar post-action-bar--listing">
-        <button class="post-action-button" type="button" data-post-share data-post-id="${postId}">
-          Compartilhar
-        </button>
+      <div class="post-action-bar post-action-bar--listing listing-card-meta">
+        <span>${escapeHtml(formatListingRelativeTime(post.createdAt))}</span>
+        ${renderPostMenu(post)}
       </div>
     `;
   }
@@ -1419,20 +1480,33 @@ function renderListingMedia(post) {
   const firstImage = items.find((item) => item.mediaType?.startsWith("image/"));
   const itemCount = getListingCardData(post).itemCount;
   const countLabel = formatListingItemCount(itemCount);
-  const openAttrs = `type="button" data-listing-open data-post-id="${escapeHtml(post.id || "")}" aria-label="Ver anúncio"`;
+  const postId = escapeHtml(post.id || "");
+  const openAttrs = `type="button" data-listing-open data-post-id="${postId}" aria-label="Ver anúncio"`;
+  const overlays = `
+    <span class="listing-preview-views" data-listing-view-count data-post-id="${postId}">${escapeHtml(formatListingViewBadge(post.listingViewCount))}</span>
+    <button class="listing-preview-share" type="button" data-post-share data-post-id="${postId}" aria-label="Compartilhar anúncio">
+      <img src="./assets/share-2.svg" alt="" aria-hidden="true">
+    </button>
+  `;
   if (!firstImage?.url) {
     return `
-      <button class="listing-preview-button listing-placeholder-card" ${openAttrs}>
-        <span class="listing-placeholder-title">Sem imagens</span>
-        <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
-      </button>
+      <div class="listing-preview-frame">
+        <button class="listing-preview-button listing-placeholder-card" ${openAttrs}>
+          <span class="listing-placeholder-title">Sem imagens</span>
+          <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
+        </button>
+        ${overlays}
+      </div>
     `;
   }
   return `
-    <button class="listing-preview-button" ${openAttrs}>
-      <img src="${escapeHtml(firstImage.url)}" alt="">
-      <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
-    </button>
+    <div class="listing-preview-frame">
+      <button class="listing-preview-button" ${openAttrs}>
+        <img src="${escapeHtml(firstImage.url)}" alt="">
+        <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
+      </button>
+      ${overlays}
+    </div>
   `;
 }
 
@@ -1585,7 +1659,12 @@ function renderListingDetail(post, sellerDetails = null) {
           ${renderPostMenu(post, { inListingDetail: true })}
         </div>
         <div>
-          <p class="listing-detail-kicker">${escapeHtml(game?.name || "Marketplace")}</p>
+          <a class="channel-line" href="${getGameUrl(game)}">
+            <span class="channel-game-logo" aria-hidden="true">
+              <img src="${escapeHtml(game?.coverUrl || "./assets/avatar.svg")}" alt="">
+            </span>
+            <span>Em ${escapeHtml(game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
+          </a>
           <h2 id="listing-detail-title">${escapeHtml(formatListingItemCount(listingData.itemCount))}</h2>
           ${listingData.description ? `<p class="listing-detail-description">${escapeHtml(listingData.description)}</p>` : ""}
         </div>
@@ -1696,23 +1775,36 @@ function closeListingDetailModal() {
   window.GimerrVideoPlayer?.stopAll?.(els.listingDetailContent);
   els.listingDetailModal.hidden = true;
   if (els.listingDetailContent) els.listingDetailContent.innerHTML = "";
+  if (getListingRoutePostId()) {
+    window.history.replaceState({}, document.title, `${window.location.origin}${window.location.pathname}`);
+  }
 }
 
 async function openListingDetail(postId) {
   const feedPost = posts.find((item) => String(item.id) === String(postId));
-  if (!feedPost || !isMarketplacePost(feedPost) || !els.listingDetailModal || !els.listingDetailContent) return;
+  if (!els.listingDetailModal || !els.listingDetailContent) return;
+  if (feedPost && !isMarketplacePost(feedPost)) return;
   els.listingDetailModal.hidden = false;
   els.listingDetailContent.innerHTML = `<div class="listing-detail-loading">Carregando anúncio...</div>`;
   try {
     const detailPost = await loadListingDetailPost(postId);
+    if (!detailPost || !isMarketplacePost(detailPost)) {
+      throw new Error("Anúncio não encontrado.");
+    }
     const post = mergeListingDetailPost(feedPost, detailPost);
+    recordListingView(postId);
     const sellerDetails = await loadListingSellerDetails(post.author?.id);
     els.listingDetailContent.innerHTML = renderListingDetail(post, sellerDetails);
     window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
   } catch (error) {
     console.warn("Não foi possível carregar detalhes do anúncio.", error);
-    els.listingDetailContent.innerHTML = renderListingDetail(feedPost, null);
-    window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
+    if (feedPost && isMarketplacePost(feedPost)) {
+      recordListingView(postId);
+      els.listingDetailContent.innerHTML = renderListingDetail(feedPost, null);
+      window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
+      return;
+    }
+    els.listingDetailContent.innerHTML = `<div class="listing-detail-loading">Não foi possível carregar este anúncio.</div>`;
   }
 }
 
@@ -2263,9 +2355,37 @@ function isMobileViewport() {
   return window.matchMedia("(max-width: 820px)").matches;
 }
 
-function setMobileComposerOpen(open) {
-  els.composer?.classList.toggle("is-mobile-open", open);
+function setComposerOpen(open) {
+  if (!els.composer) return;
+  els.composer.hidden = !open;
+  els.composer.classList.toggle("is-mobile-open", open);
   document.body.classList.toggle("has-mobile-composer-open", open);
+  if (els.openComposer) {
+    els.openComposer.setAttribute("aria-expanded", String(open));
+  }
+}
+
+function setMobileComposerOpen(open) {
+  setComposerOpen(open);
+}
+
+function shouldOpenComposerFromRoute() {
+  const url = new URL(window.location.href);
+  return url.searchParams.get("openComposer") === "1" || url.hash === "#composer";
+}
+
+function clearComposerRouteFlag() {
+  const url = new URL(window.location.href);
+  const hadFlag = url.searchParams.has("openComposer") || url.hash === "#composer";
+  if (!hadFlag) return;
+  url.searchParams.delete("openComposer");
+  if (url.hash === "#composer") url.hash = "";
+  window.history.replaceState({}, "", url.toString());
+}
+
+function openComposerAndFocus() {
+  setComposerOpen(true);
+  window.setTimeout(() => els.composerText?.focus(), 80);
 }
 
 function cancelListingEdit() {
@@ -2278,6 +2398,7 @@ function cancelListingEdit() {
   clearComposerFile();
   setComposerMode("listing");
   setComposerAvailability();
+  setComposerOpen(false);
 }
 
 async function startListingEdit(postId) {
@@ -2298,16 +2419,14 @@ async function startListingEdit(postId) {
   else if (els.composerServer) els.composerServer.value = String(post.gameId || "");
   if (els.cancelListingEdit) els.cancelListingEdit.hidden = false;
   setComposerAvailability();
-  if (isMobileViewport()) {
-    setMobileComposerOpen(true);
-  }
+  setComposerOpen(true);
   els.composer.scrollIntoView({ behavior: "smooth", block: "start" });
   window.setTimeout(() => els.composerText.focus());
 }
 
 function renderFollowedGames() {
   els.serverCount.textContent = String(state.followedGames.length);
-  els.followedGamesPanel.hidden = state.followedGames.length === 0;
+  els.followedGamesPanel.hidden = true;
 
   if (!state.followedGames.length) {
     els.serverList.innerHTML = "";
@@ -2461,7 +2580,6 @@ function renderFeed({ prepareVideos = true } = {}) {
     const isListing = isMarketplacePost(post);
     return `
       <article class="post-card${isListing ? " marketplace-post-card" : ""}">
-        ${isListing ? `<div class="post-card-tools marketplace-card-tools">${renderPostMenu(post)}</div>` : ""}
         ${media}
         <div class="post-body">
           ${isListing ? "" : renderMentionLine(authorName, post)}
@@ -2488,7 +2606,7 @@ function renderFeed({ prepareVideos = true } = {}) {
             <span class="channel-game-logo" aria-hidden="true">
               <img src="${escapeHtml(game?.coverUrl || "./assets/avatar.svg")}" alt="">
             </span>
-            <span>Em ${escapeHtml(game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
+            <span>Em ${escapeHtml(game?.name || "Game")}</span>
           </a>
           ${renderPostActions(post)}
         </div>
@@ -2816,7 +2934,7 @@ async function publishPost() {
       resetListingItems();
     }
     clearComposerFile();
-    setMobileComposerOpen(false);
+    setComposerOpen(false);
     state.feedOffset = 0;
     state.feedHasMore = true;
     await loadFeedPosts();
@@ -3353,7 +3471,7 @@ document.addEventListener("keydown", (event) => {
     closePostMenus();
     closeMentionSuggestions();
     hideComposerGameSuggestions();
-    setMobileComposerOpen(false);
+    setComposerOpen(false);
     if (!els.verificationModal.hidden) closeVerificationModal();
   }
 });
@@ -3370,21 +3488,17 @@ document.addEventListener("gimerr:video-view", (event) => {
 });
 
 els.openComposer.addEventListener("click", () => {
-  if (isMobileViewport()) {
-    setMobileComposerOpen(true);
-    window.setTimeout(() => els.composerText.focus());
-    return;
-  }
-  els.composer.scrollIntoView({ behavior: "smooth", block: "start" });
-  els.composerText.focus();
+  openComposerAndFocus();
 });
 
 els.closeComposer?.addEventListener("click", () => {
-  setMobileComposerOpen(false);
+  setComposerOpen(false);
 });
 
 window.addEventListener("resize", () => {
-  if (!isMobileViewport()) setMobileComposerOpen(false);
+  if (!els.composer || els.composer.hidden) return;
+  els.composer.classList.add("is-mobile-open");
+  document.body.classList.add("has-mobile-composer-open");
 });
 
 els.composerGameSearch?.addEventListener("input", (event) => {
@@ -3440,10 +3554,16 @@ async function init() {
     return false;
   });
   if (!canRender) return;
+  const routeListingPostId = getListingRoutePostId();
 
   await completeDiscordConnectionFromCallback();
 
   setPublishing(true, "Carregando...");
+
+  if (shouldOpenComposerFromRoute()) {
+    openComposerAndFocus();
+    clearComposerRouteFlag();
+  }
 
   const followedPromise = withTimeout(loadFollowedGames(), 12000, "A lista de games demorou mais que o esperado.")
     .catch((error) => {
@@ -3485,6 +3605,9 @@ async function init() {
     });
 
   await Promise.allSettled([followedPromise, followedProfilesPromise, currentProfilePromise, feedPromise]);
+  if (routeListingPostId) {
+    await openListingDetail(routeListingPostId);
+  }
 }
 
 init();

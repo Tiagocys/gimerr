@@ -25,6 +25,47 @@ async function fetchPosts(env, ids) {
   return new Map(rows.map((post) => [post.id, post]));
 }
 
+async function fetchReportAttachments(env, reportIds) {
+  const uniqueIds = [...new Set(reportIds.filter(Boolean))];
+  if (!uniqueIds.length) return new Map();
+
+  const ticketsUrl = new URL(`${getSupabaseRestUrl(env)}/admin_tickets`);
+  ticketsUrl.searchParams.set("select", "source_id,conversation_id");
+  ticketsUrl.searchParams.set("source_type", "eq.post_report");
+  ticketsUrl.searchParams.set("source_id", `in.(${uniqueIds.join(",")})`);
+  const ticketsResponse = await fetch(ticketsUrl.toString(), { headers: getServiceHeaders(env) });
+  const tickets = await ticketsResponse.json().catch(() => []);
+  if (!ticketsResponse.ok) throw new Error(tickets.message || "Não foi possível carregar anexos das denúncias.");
+
+  const conversationIds = tickets.map((ticket) => ticket.conversation_id).filter(Boolean);
+  if (!conversationIds.length) return new Map();
+
+  const messagesUrl = new URL(`${getSupabaseRestUrl(env)}/conversation_messages`);
+  messagesUrl.searchParams.set("select", "id,conversation_id,media_url,media_type,created_at");
+  messagesUrl.searchParams.set("conversation_id", `in.(${[...new Set(conversationIds)].join(",")})`);
+  messagesUrl.searchParams.set("media_url", "not.is.null");
+  messagesUrl.searchParams.set("status", "eq.active");
+  messagesUrl.searchParams.set("order", "created_at.asc");
+  const messagesResponse = await fetch(messagesUrl.toString(), { headers: getServiceHeaders(env) });
+  const messages = await messagesResponse.json().catch(() => []);
+  if (!messagesResponse.ok) throw new Error(messages.message || "Não foi possível carregar imagens anexadas.");
+
+  const reportByConversation = new Map(tickets.map((ticket) => [ticket.conversation_id, ticket.source_id]));
+  const attachmentsByReport = new Map();
+  messages.forEach((message) => {
+    const reportId = reportByConversation.get(message.conversation_id);
+    if (!reportId) return;
+    if (!attachmentsByReport.has(reportId)) attachmentsByReport.set(reportId, []);
+    attachmentsByReport.get(reportId).push({
+      id: message.id,
+      mediaUrl: message.media_url,
+      mediaType: message.media_type,
+      createdAt: message.created_at,
+    });
+  });
+  return attachmentsByReport;
+}
+
 function toPublicProfile(profile) {
   if (!profile) return null;
   return {
@@ -56,7 +97,10 @@ export async function onRequestGet({ request, env }) {
     const reports = await response.json().catch(() => []);
     if (!response.ok) throw new Error(reports.message || "Não foi possível carregar denúncias.");
 
-    const posts = await fetchPosts(env, reports.map((report) => report.post_id));
+    const [posts, attachmentsByReport] = await Promise.all([
+      fetchPosts(env, reports.map((report) => report.post_id)),
+      fetchReportAttachments(env, reports.map((report) => report.id)),
+    ]);
     const profiles = await fetchProfiles(env, reports.flatMap((report) => {
       const post = posts.get(report.post_id);
       return [report.reporter_id, report.reported_profile_id, post?.profile_id, report.reviewed_by];
@@ -77,6 +121,7 @@ export async function onRequestGet({ request, env }) {
           reporter: toPublicProfile(profiles.get(report.reporter_id)),
           reportedUser: toPublicProfile(profiles.get(reportedProfileId)),
           reviewedBy: toPublicProfile(profiles.get(report.reviewed_by)),
+          attachments: attachmentsByReport.get(report.id) || [],
           post: {
             id: currentPost?.id || report.post_id,
             exists: Boolean(currentPost),

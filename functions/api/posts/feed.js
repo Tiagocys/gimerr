@@ -41,6 +41,38 @@ function cleanNumber(value, fallback, { min = 0, max = 20 } = {}) {
   return Math.max(min, Math.min(max, number));
 }
 
+async function fetchPreferenceIds(env, profileId) {
+  const headers = getServiceHeaders(env);
+  const [gamesResponse, recommendationsResponse] = await Promise.all([
+    fetch(`${getSupabaseRestUrl(env)}/game_follows?select=game_igdb_id&profile_id=eq.${profileId}&limit=500`, {
+      headers,
+    }),
+    fetch(`${getSupabaseRestUrl(env)}/profile_recommendations?select=recommended_id&recommender_id=eq.${profileId}&limit=500`, {
+      headers,
+    }),
+  ]);
+
+  const [games, recommendations] = await Promise.all([
+    gamesResponse.json().catch(() => []),
+    recommendationsResponse.json().catch(() => []),
+  ]);
+
+  if (!gamesResponse.ok) throw new Error(games.message || "Não foi possível carregar preferências de jogos.");
+  if (!recommendationsResponse.ok) throw new Error(recommendations.message || "Não foi possível carregar recomendações.");
+
+  return {
+    followedGameIds: new Set((games || []).map((row) => String(row.game_igdb_id)).filter(Boolean)),
+    recommendedProfileIds: new Set((recommendations || []).map((row) => String(row.recommended_id)).filter(Boolean)),
+  };
+}
+
+function getPreferenceScore(row, preferences) {
+  let score = 0;
+  if (preferences.followedGameIds.has(String(row.game_igdb_id))) score += 2;
+  if (preferences.recommendedProfileIds.has(String(row.profile_id))) score += 1;
+  return score;
+}
+
 export async function onRequestGet({ request, env }) {
   try {
     const auth = await requireAuthUser(request, env);
@@ -50,13 +82,14 @@ export async function onRequestGet({ request, env }) {
     const limit = cleanNumber(requestUrl.searchParams.get("limit"), 10, { min: 1, max: 15 });
     const offset = cleanNumber(requestUrl.searchParams.get("offset"), 0, { min: 0, max: 5000 });
     const fetchLimit = limit + 1;
+    const queryLimit = Math.min(500, Math.max(fetchLimit, offset + fetchLimit + 60));
     const ignoredProfileIds = [...(await fetchIgnoredProfileIds(env, auth.user.id))];
+    const preferences = await fetchPreferenceIds(env, auth.user.id);
 
     const url = new URL(`${getSupabaseRestUrl(env)}/public_feed_posts`);
     url.searchParams.set("select", "*");
     url.searchParams.set("order", "created_at.desc");
-    url.searchParams.set("limit", String(fetchLimit));
-    if (offset > 0) url.searchParams.set("offset", String(offset));
+    url.searchParams.set("limit", String(queryLimit));
     if (ignoredProfileIds.length) {
       url.searchParams.set("profile_id", `not.${inFilter(ignoredProfileIds)}`);
     }
@@ -67,11 +100,20 @@ export async function onRequestGet({ request, env }) {
     const rows = await response.json().catch(() => []);
     if (!response.ok) throw new Error(rows.message || "Não foi possível carregar o feed.");
 
-    const hasMore = rows.length > limit;
+    const sortedRows = rows
+      .map((row) => ({ row, score: getPreferenceScore(row, preferences) }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return Date.parse(b.row.created_at || "") - Date.parse(a.row.created_at || "");
+      })
+      .map((item) => item.row);
+
+    const pageRows = sortedRows.slice(offset, offset + limit);
+    const hasMore = pageRows.length > 0 && (sortedRows.length > offset + limit || rows.length >= queryLimit);
     return jsonResponse({
-      posts: rows.slice(0, limit).map(toPublicPost),
+      posts: pageRows.map(toPublicPost),
       hasMore,
-      nextOffset: offset + Math.min(rows.length, limit),
+      nextOffset: offset + pageRows.length,
     });
   } catch (error) {
     console.error("post feed failed", error);

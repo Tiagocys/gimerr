@@ -14,9 +14,14 @@ function requireWorker(request, env) {
   return null;
 }
 
+function getStaleProcessingDate(env) {
+  const minutes = Math.max(30, Number(env.VIDEO_WORKER_STALE_MINUTES || 120));
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
 async function fetchNextUploadedPost(env) {
   const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
-  url.searchParams.set("select", "id,profile_id,post_type,media_url,media_key,media_type,original_media_url,original_media_key,created_at");
+  url.searchParams.set("select", "id,profile_id,post_type,media_url,media_key,media_type,original_media_url,original_media_key,video_status,processing_started_at,created_at");
   url.searchParams.set("status", "eq.active");
   url.searchParams.set("video_status", "eq.uploaded");
   url.searchParams.set("order", "created_at.asc");
@@ -30,10 +35,34 @@ async function fetchNextUploadedPost(env) {
   return rows.find((row) => row.original_media_key || row.media_key) || null;
 }
 
-async function markProcessing(env, postId) {
+async function fetchNextStaleProcessingPost(env) {
   const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
-  url.searchParams.set("id", `eq.${postId}`);
-  url.searchParams.set("video_status", "eq.uploaded");
+  url.searchParams.set("select", "id,profile_id,post_type,media_url,media_key,media_type,original_media_url,original_media_key,video_status,processing_started_at,created_at");
+  url.searchParams.set("status", "eq.active");
+  url.searchParams.set("video_status", "eq.processing");
+  url.searchParams.set("processing_started_at", `lt.${getStaleProcessingDate(env)}`);
+  url.searchParams.set("order", "processing_started_at.asc.nullsfirst,created_at.asc");
+  url.searchParams.set("limit", "10");
+
+  const response = await fetch(url.toString(), {
+    headers: getServiceHeaders(env),
+  });
+  const rows = await response.json().catch(() => []);
+  if (!response.ok) throw new Error(rows.message || "Não foi possível buscar vídeos travados.");
+  return rows.find((row) => row.original_media_key || row.media_key) || null;
+}
+
+async function fetchNextPost(env) {
+  return await fetchNextUploadedPost(env) || await fetchNextStaleProcessingPost(env);
+}
+
+async function markProcessing(env, post) {
+  const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
+  url.searchParams.set("id", `eq.${post.id}`);
+  url.searchParams.set("video_status", `eq.${post.video_status || "uploaded"}`);
+  if (post.video_status === "processing") {
+    url.searchParams.set("processing_started_at", `lt.${getStaleProcessingDate(env)}`);
+  }
 
   const response = await fetch(url.toString(), {
     method: "PATCH",
@@ -54,12 +83,12 @@ export async function onRequestPost({ request, env }) {
     const unauthorized = requireWorker(request, env);
     if (unauthorized) return unauthorized;
 
-    const nextPost = await fetchNextUploadedPost(env);
+    const nextPost = await fetchNextPost(env);
     if (!nextPost) {
       return jsonResponse({ job: null });
     }
 
-    const reserved = await markProcessing(env, nextPost.id);
+    const reserved = await markProcessing(env, nextPost);
     if (!reserved) {
       return jsonResponse({ job: null });
     }

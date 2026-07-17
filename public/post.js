@@ -7,6 +7,8 @@
     comments: [],
     commentsError: "",
     commentSubmitting: false,
+    editingPost: false,
+    editSubmitting: false,
     replyingToCommentId: "",
     followedProfiles: [],
     commentMention: {
@@ -477,7 +479,9 @@
 
   function renderPostMenu(post) {
     const postId = escapeHtml(post.id);
-    const isOwner = state.session?.user?.id && post.author?.id === state.session.user.id;
+    const ownerId = post.author?.id || post.profileId || post.profile_id || "";
+    const isOwner = state.session?.user?.id && String(ownerId) === String(state.session.user.id);
+    const isListing = post.type === "listing";
     return `
       <div class="post-menu" data-post-menu>
         <button class="ghost-icon post-menu-button" type="button" data-post-menu-toggle data-post-id="${postId}" aria-label="Abrir menu do post" aria-expanded="false">
@@ -485,7 +489,9 @@
         </button>
         <div class="post-menu-popover" hidden>
           ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
-          ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Apagar post</button>` : ""}
+          ${isOwner && isListing ? `<a href="./?editListing=${encodeURIComponent(post.id)}">Editar</a>` : ""}
+          ${isOwner && !isListing ? `<button type="button" data-post-edit data-post-id="${postId}">Editar</button>` : ""}
+          ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Excluir</button>` : ""}
         </div>
       </div>
     `;
@@ -564,11 +570,13 @@
             </span>
           </a>
           <div class="listing-seller-stats">
-            <span>${escapeHtml(formatCountLabel(stats.followers_count, "seguidor", "seguidores"))}</span>
             <span>${escapeHtml(formatCountLabel(stats.recommendations_count, "recomendação", "recomendações"))}</span>
           </div>
           ${canMessageSeller ? `
-            <a class="primary-button listing-message-button" href="./messages?listingPostId=${encodeURIComponent(post.id)}">Enviar mensagem</a>
+            <a class="primary-button listing-message-button message-action-button" href="./messages?listingPostId=${encodeURIComponent(post.id)}">
+              <img src="./assets/message.svg" alt="" aria-hidden="true">
+              <span>Enviar mensagem</span>
+            </a>
           ` : ""}
           <div class="listing-seller-contact">
             <strong>Contato</strong>
@@ -576,6 +584,21 @@
           </div>
         </aside>
       </div>
+    `;
+  }
+
+  function renderPostTextBlock(post) {
+    if (!state.editingPost) {
+      return post.body ? `<p class="post-text">${escapeHtml(post.body)}</p>` : "";
+    }
+    return `
+      <form class="post-edit-form" data-post-edit-form data-post-id="${escapeHtml(post.id || "")}">
+        <textarea class="post-edit-textarea" name="body" maxlength="1200" rows="4">${escapeHtml(post.body || "")}</textarea>
+        <div class="post-edit-actions">
+          <button class="primary-button" type="submit" ${state.editSubmitting ? "disabled" : ""}>${state.editSubmitting ? "Salvando..." : "Salvar"}</button>
+          <button class="text-button" type="button" data-post-edit-cancel data-post-id="${escapeHtml(post.id || "")}" ${state.editSubmitting ? "disabled" : ""}>Cancelar</button>
+        </div>
+      </form>
     `;
   }
 
@@ -626,21 +649,10 @@
       return;
     }
 
-    const reason = window.prompt("Informe o motivo da denúncia. Você pode deixar em branco.");
-    if (reason === null) return;
-
-    const response = await fetch("/api/posts/report", {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${state.session.access_token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ postId, reason }),
+    window.GimerrReport?.open({
+      postId,
+      token: state.session.access_token,
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "Não foi possível denunciar este post.");
-    window.alert("Denúncia enviada.");
   }
 
   async function deletePost(postId) {
@@ -661,6 +673,41 @@
     if (!response.ok) throw new Error(payload.error || "Não foi possível apagar este post.");
 
     els.card.innerHTML = `<div class="post-card empty-state">Post apagado.</div>`;
+  }
+
+  async function editPostText(postId) {
+    if (!state.session?.access_token || !state.post || state.post.type === "listing") return;
+    state.editingPost = true;
+    renderPost();
+    window.setTimeout(() => {
+      const textarea = document.querySelector(`[data-post-edit-form][data-post-id="${CSS.escape(String(postId || ""))}"] textarea`);
+      textarea?.focus();
+      textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
+  }
+
+  async function savePostText(postId, body) {
+    if (!state.session?.access_token || !state.post || state.post.type === "listing") return;
+    state.editSubmitting = true;
+    const response = await fetch("/api/posts/update", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${state.session.access_token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ postId, body }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível editar este post.");
+
+    state.post = {
+      ...state.post,
+      body: payload.post?.body ?? String(body || "").trim(),
+    };
+    state.editingPost = false;
+    state.editSubmitting = false;
+    renderPost();
   }
 
   function renderMissing(message) {
@@ -707,7 +754,7 @@
             </div>
           </div>
           <div>
-            ${post.body ? `<p class="post-text">${escapeHtml(post.body)}</p>` : ""}
+            ${renderPostTextBlock(post)}
           </div>
           <a class="channel-line" href="${getGameUrl(post.game)}">
             <span class="channel-game-logo" aria-hidden="true">
@@ -852,23 +899,23 @@
     state.session = data.session || null;
   }
 
-  async function loadFollowedProfiles() {
+  async function loadRecommendedProfiles() {
     if (!state.session?.user || !window.GimerrAuth) {
       state.followedProfiles = [];
       return;
     }
 
     const client = await window.GimerrAuth.getClient();
-    const { data: follows, error: followsError } = await client
-      .from("user_follows")
-      .select("following_id")
-      .eq("follower_id", state.session.user.id)
+    const { data: recommendations, error: recommendationsError } = await client
+      .from("profile_recommendations")
+      .select("recommended_id")
+      .eq("recommender_id", state.session.user.id)
       .order("created_at", { ascending: false });
 
-    if (followsError) throw followsError;
+    if (recommendationsError) throw recommendationsError;
 
-    const followedIds = [...new Set((follows || [])
-      .map((row) => row.following_id)
+    const followedIds = [...new Set((recommendations || [])
+      .map((row) => row.recommended_id)
       .filter(Boolean))];
 
     if (!followedIds.length) {
@@ -901,7 +948,7 @@
         .maybeSingle(),
       client
         .from("public_profile_stats")
-        .select("profile_id, followers_count, recommendations_count")
+        .select("profile_id, recommendations_count")
         .eq("profile_id", authorId)
         .maybeSingle(),
       client
@@ -1137,6 +1184,28 @@
       return;
     }
 
+    const editPostButton = target.closest("[data-post-edit]");
+    if (editPostButton) {
+      event.preventDefault();
+      closePostMenus();
+      try {
+        await editPostText(editPostButton.dataset.postId || "");
+      } catch (error) {
+        console.warn("Não foi possível editar post.", error);
+        window.alert(error.message || "Não foi possível editar este post.");
+      }
+      return;
+    }
+
+    const editPostCancelButton = target.closest("[data-post-edit-cancel]");
+    if (editPostCancelButton) {
+      event.preventDefault();
+      state.editingPost = false;
+      state.editSubmitting = false;
+      renderPost();
+      return;
+    }
+
     const mentionButton = target.closest("[data-comment-mention-index]");
     if (mentionButton) {
       event.preventDefault();
@@ -1195,6 +1264,21 @@
   });
 
   document.addEventListener("submit", async (event) => {
+    const editForm = event.target instanceof Element ? event.target.closest("[data-post-edit-form]") : null;
+    if (editForm) {
+      event.preventDefault();
+      const postId = editForm.dataset.postId || "";
+      const textarea = editForm.querySelector("textarea");
+      try {
+        await savePostText(postId, textarea?.value || "");
+      } catch (error) {
+        console.warn("Não foi possível editar post.", error);
+        state.editSubmitting = false;
+        window.alert(error.message || "Não foi possível editar este post.");
+      }
+      return;
+    }
+
     const form = event.target instanceof Element ? event.target.closest("[data-comment-form]") : null;
     if (!form) return;
     event.preventDefault();
@@ -1240,8 +1324,8 @@
     await loadSession().catch((error) => {
       console.warn("Não foi possível carregar sessão.", error);
     });
-    await loadFollowedProfiles().catch((error) => {
-      console.warn("Não foi possível carregar perfis seguidos.", error);
+    await loadRecommendedProfiles().catch((error) => {
+      console.warn("Não foi possível carregar perfis recomendados.", error);
       state.followedProfiles = [];
     });
     await loadPost();

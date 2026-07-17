@@ -24,12 +24,7 @@
 
       <nav class="top-actions" aria-label="Ações principais">
         <button class="primary-button navbar-create-listing" id="open-composer" type="button" data-create-listing-button aria-controls="composer" aria-expanded="false">
-          + Criar anúncio
-        </button>
-        <button class="ghost-icon" type="button" aria-label="Notificações">
-          <svg aria-hidden="true" viewBox="0 0 24 24">
-            <path d="M12 22a2.7 2.7 0 0 0 2.5-1.7h-5A2.7 2.7 0 0 0 12 22Zm7-5.8V11a7 7 0 0 0-5.5-6.8V3a1.5 1.5 0 0 0-3 0v1.2A7 7 0 0 0 5 11v5.2l-1.6 1.6V19h17.2v-1.2L19 16.2Z"/>
-          </svg>
+          + Criar
         </button>
         <a class="auth-button" href="./sign-in.html" hidden>Entrar</a>
         <div class="account-menu" data-account-menu hidden></div>
@@ -51,19 +46,23 @@
       <section class="feed-column" aria-label="Feed">
         <section class="composer is-listing-mode" id="composer" hidden>
           <div class="composer-mobile-head">
-            <h2>Novo anúncio</h2>
+            <h2 id="composer-title">Nova publicação</h2>
             <button class="ghost-icon" id="close-composer" type="button" aria-label="Fechar novo anúncio">x</button>
+          </div>
+          <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação">
+            <button class="tab-button" type="button" data-composer-mode="post" role="tab" aria-selected="false">Post</button>
+            <button class="tab-button is-active" type="button" data-composer-mode="listing" role="tab" aria-selected="true">Anúncio</button>
           </div>
           <textarea id="composer-text" rows="4" maxlength="1200" placeholder="Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes."></textarea>
           <div class="composer-mention-suggestions" id="composer-mention-suggestions" hidden></div>
           <div class="listing-video-upload">
             <label class="text-button upload-button" for="composer-file">
-              <svg aria-hidden="true" viewBox="0 0 24 24">
+              <svg id="composer-file-icon" aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M17 10.5V6c0-1.1-.9-2-2-2H5C3.9 4 3 4.9 3 6v12c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-4.5l4 4v-11l-4 4Z"/>
               </svg>
-              Adicionar vídeo
+              <span id="composer-file-label">Adicionar vídeo</span>
             </label>
-            <span>Opcional: 1 vídeo de até 3 minutos e 500 MB.</span>
+            <span id="composer-file-helper">Opcional: 1 vídeo de até 3 minutos e 500 MB.</span>
             <input id="composer-file" class="composer-video-input" type="file" accept="video/mp4,video/webm,video/quicktime">
           </div>
           <p class="composer-step-helper" id="composer-video-helper" hidden></p>
@@ -89,7 +88,7 @@
                 </select>
               </label>
               <label class="composer-game-field" for="composer-game-search">
-                <span>Jogo do anúncio</span>
+                <span id="composer-game-label">Jogo do anúncio</span>
                 <div class="composer-game-combobox">
                   <input id="composer-game-search" type="search" autocomplete="off" placeholder="Buscar jogo">
                   <input id="composer-server" type="hidden">
@@ -132,7 +131,18 @@
           </div>
         </section>
 
-        <div class="marketplace-feed-search" id="marketplace-feed-search">
+        <div class="filter-bar" aria-label="Filtrar feed">
+          <button class="filter-chip is-active" type="button" data-filter="all">
+            Tudo
+            <span class="filter-count" data-filter-count="all" hidden>0</span>
+          </button>
+          <button class="filter-chip" type="button" data-filter="listing">
+            Marketplace
+            <span class="filter-count" data-filter-count="listing" hidden>0</span>
+          </button>
+        </div>
+
+        <div class="marketplace-feed-search" id="marketplace-feed-search" hidden>
           <label for="marketplace-search">Buscar no Marketplace</label>
           <input id="marketplace-search" type="search" placeholder="Buscar anúncio, game, item ou vendedor">
         </div>
@@ -196,7 +206,6 @@
 
   <div class="modal-backdrop" id="listing-detail-modal" hidden>
     <section class="listing-detail-modal" role="dialog" aria-modal="true" aria-labelledby="listing-detail-title">
-      <button class="ghost-icon listing-detail-close" id="listing-detail-close" type="button" aria-label="Voltar">x</button>
       <div id="listing-detail-content"></div>
     </section>
   </div>
@@ -210,6 +219,7 @@
   <script src="./media-lightbox.js" defer></script>
   <script src="./vendor/qrcode.js" defer></script>
   <script src="./share-modal.js" defer></script>
+  <script src="./report-modal.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>

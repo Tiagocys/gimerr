@@ -1,5 +1,7 @@
 import { deleteR2Object, getSupabaseRestUrl, jsonResponse } from "../_shared/auth.js";
 import { getServiceHeaders, requireAdminUser } from "../_shared/admin.js";
+import { sendAdminTicketSystemMessage, setAdminTicketStatus } from "../_shared/admin-tickets.js";
+import { sendSystemMessage } from "../_shared/messages.js";
 
 const ACTIONS = new Set(["suspend_7_days", "delete_post", "ban_user", "ignore"]);
 
@@ -30,26 +32,23 @@ async function patchRows(env, table, filters, body) {
   return rows;
 }
 
-async function createNotification(env, recipientId, type, title, body, data = {}) {
-  if (!recipientId) return;
-  const response = await fetch(`${getSupabaseRestUrl(env)}/notifications`, {
-    method: "POST",
-    headers: getServiceHeaders(env, { prefer: "return=minimal" }),
-    body: JSON.stringify({
-      recipient_id: recipientId,
-      sender_name: "Gimerr",
-      sender_avatar_url: "/assets/favicon.png",
-      type,
-      title,
-      body,
-      action_url: null,
-      data,
-    }),
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.message || "Não foi possível criar notificação de moderação.");
-  }
+function getReportResolutionLabel(resolution) {
+  const labels = {
+    suspended_7_days: "usuario_suspenso_7_dias",
+    post_deleted: "post_excluido",
+    user_banned: "usuario_banido",
+    ignored: "sem_acao_aplicada",
+  };
+  return labels[resolution] || resolution || "analise_concluida";
+}
+
+function getReporterMessage(resolution, note) {
+  const lines = [
+    "Sua denúncia foi analisada e acreditamos ter tomado a decisão correta em relação a ela:",
+    `[${getReportResolutionLabel(resolution)}]`,
+  ];
+  if (note) lines.push(`Observação da equipe: ${note}`);
+  return lines.join("\n\n");
 }
 
 function collectPostMediaKeys(post) {
@@ -133,13 +132,10 @@ export async function onRequestPost({ request, env }) {
         moderated_at: now.toISOString(),
         moderated_by: admin.user.id,
       });
-      await createNotification(
+      await sendSystemMessage(
         env,
         targetUser.id,
-        "account_suspended",
-        "Conta suspensa por 7 dias",
-        `Sua conta foi suspensa até ${suspendedUntil.toLocaleDateString("pt-BR")} após uma análise da moderação do Gimerr.`,
-        { suspendedUntil: suspendedUntil.toISOString(), reportId },
+        `Sua conta foi suspensa até ${suspendedUntil.toLocaleDateString("pt-BR")} após o recebimento e análise de uma denúncia.${note ? `\n\nObservação da equipe: ${note}` : ""}`,
       );
       resolution = "suspended_7_days";
     } else if (action === "delete_post") {
@@ -147,13 +143,10 @@ export async function onRequestPost({ request, env }) {
       const relatedReports = await fetchRows(env, "post_reports", "id", { post_id: `eq.${post.id}`, status: "eq.pending" });
       affectedReportIds = relatedReports.map((item) => item.id);
       await deleteReportedPost(env, post);
-      await createNotification(
+      await sendSystemMessage(
         env,
         targetUser.id,
-        "post_removed_by_moderation",
-        "Publicação removida",
-        "Uma publicação sua foi removida após análise da moderação do Gimerr.",
-        { reportId },
+        `Seu post foi excluído após o recebimento de uma denúncia.${note ? `\n\nObservação da equipe: ${note}` : ""}`,
       );
       resolution = "post_deleted";
     } else if (action === "ban_user") {
@@ -164,25 +157,15 @@ export async function onRequestPost({ request, env }) {
         moderated_at: now.toISOString(),
         moderated_by: admin.user.id,
       });
-      await createNotification(
+      await sendSystemMessage(
         env,
         targetUser.id,
-        "account_banned",
-        "Conta banida permanentemente",
-        "Sua conta foi banida permanentemente após uma análise da moderação do Gimerr.",
-        { reportId },
+        `Sua conta foi banida permanentemente após o recebimento e análise de uma denúncia.${note ? `\n\nObservação da equipe: ${note}` : ""}`,
       );
       resolution = "user_banned";
-    } else {
-      await createNotification(
-        env,
-        report.reporter_id,
-        "report_reviewed",
-        "Denúncia analisada",
-        "A moderação analisou sua denúncia e decidiu não aplicar uma ação ao conteúdo reportado.",
-        { reportId },
-      );
     }
+
+    await sendAdminTicketSystemMessage(env, "post_report", affectedReportIds, getReporterMessage(resolution, note));
 
     const reportFilter = affectedReportIds.length === 1
       ? `eq.${affectedReportIds[0]}`
@@ -193,6 +176,11 @@ export async function onRequestPost({ request, env }) {
       resolution_note: note,
       reviewed_at: now.toISOString(),
       reviewed_by: admin.user.id,
+    });
+    await setAdminTicketStatus(env, "post_report", affectedReportIds, "closed", {
+      reopenable: false,
+      userCanReply: false,
+      closedBy: admin.user.id,
     });
 
     return jsonResponse({ ok: true, reports: updated, resolution });

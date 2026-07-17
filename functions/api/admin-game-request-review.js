@@ -1,5 +1,7 @@
 import { getSupabaseRestUrl, jsonResponse } from "../_shared/auth.js";
 import { getServiceHeaders, requireAdminUser } from "../_shared/admin.js";
+import { createAdminTicket } from "../_shared/admin-tickets.js";
+import { sendSystemMessage } from "../_shared/messages.js";
 
 function cleanText(value, maxLength) {
   return String(value || "")
@@ -58,43 +60,17 @@ function normalizeTaxonomy(value) {
     .slice(0, 20);
 }
 
-function getReviewNotification(action, submission, reviewNotes) {
+function getReviewMessage(action, submission, reviewNotes) {
   const approved = action === "approve";
-  const gameName = submission.name || "seu jogo";
-  return {
-    recipient_id: submission.submitted_by,
-    sender_name: "Gimerr",
-    sender_avatar_url: "./assets/favicon.png",
-    type: approved ? "game_submission_approved" : "game_submission_rejected",
-    title: approved
-      ? `Sua solicitação de ${gameName} foi aprovada`
-      : `Sua solicitação de ${gameName} foi reprovada`,
-    body: reviewNotes || (approved
-      ? "O jogo foi enviado para a base do Gimerr."
-      : "A solicitação foi analisada pela equipe do Gimerr."),
-    action_url: null,
-    data: {
-      game_submission_request_id: submission.id,
-      game_name: gameName,
-      status: approved ? "approved" : "rejected",
-      review_notes: reviewNotes,
-    },
-  };
-}
-
-async function createNotification(env, notification) {
-  const response = await fetch(`${getSupabaseRestUrl(env)}/notifications`, {
-    method: "POST",
-    headers: getServiceHeaders(env, {
-      prefer: "return=minimal",
-    }),
-    body: JSON.stringify(notification),
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    console.warn("Não foi possível criar notificação.", payload.message || payload);
-  }
+  const gameName = submission.name || "Nome do Jogo";
+  const lines = [
+    `O cadastro do jogo "${gameName}" foi ${approved ? "aprovado" : "reprovado"}.`,
+    approved
+      ? "Você já pode criar anúncios."
+      : "Você pode tentar enviar uma nova solicitação com dados atualizados do cadastro do jogo.",
+  ];
+  if (reviewNotes) lines.push(`Observação da equipe: ${reviewNotes}`);
+  return lines.join("\n\n");
 }
 
 function buildManualGame(request) {
@@ -188,6 +164,9 @@ export async function onRequestPost({ request, env }) {
     if (!id) {
       return jsonResponse({ error: "Solicitação inválida." }, { status: 400 });
     }
+    if (action === "reject" && !reviewNotes) {
+      return jsonResponse({ error: "Informe o motivo da reprovação." }, { status: 400 });
+    }
 
     const submission = await fetchSubmission(env, id);
     if (!submission) {
@@ -211,7 +190,21 @@ export async function onRequestPost({ request, env }) {
       approved_igdb_id: approvedGame?.igdb_id || null,
     });
 
-    await createNotification(env, getReviewNotification(action, submission, reviewNotes));
+    const reviewMessage = getReviewMessage(action, submission, reviewNotes);
+    if (action === "reject") {
+      await createAdminTicket(env, {
+        sourceType: "game_submission",
+        sourceId: submission.id,
+        requesterId: submission.submitted_by,
+        title: `Cadastro de jogo reprovado: ${submission.name}`,
+        initialMessage: [
+          reviewMessage,
+          "Você pode responder esta conversa para complementar a solicitação enquanto o caso estiver aberto.",
+        ].join("\n\n"),
+      });
+    } else {
+      await sendSystemMessage(env, submission.submitted_by, reviewMessage);
+    }
 
     return jsonResponse({
       request: updated,

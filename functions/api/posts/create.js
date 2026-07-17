@@ -1,6 +1,5 @@
 import { deleteR2Object, getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
-import { requireDiscordBotVerifiedForVideoUpload } from "../../_shared/verification.js";
 
 const VALID_TYPES = new Set(["post", "video", "listing"]);
 const VALID_MEDIA_PREFIXES = ["posts/", "videos/", "market/"];
@@ -112,19 +111,13 @@ function normalizeMediaItems(items, postType) {
   return normalized;
 }
 
-async function userFollowsGame(env, userId, gameId) {
-  const url = new URL(`${getSupabaseRestUrl(env)}/game_follows`);
-  url.searchParams.set("select", "game_igdb_id");
-  url.searchParams.set("profile_id", `eq.${userId}`);
-  url.searchParams.set("game_igdb_id", `eq.${gameId}`);
-  url.searchParams.set("limit", "1");
+function hasValidListingItem(items) {
+  return (Array.isArray(items) ? items : [])
+    .some((item) => cleanText(item?.itemName, 120) && cleanText(item?.priceLabel, 80));
+}
 
-  const response = await fetch(url.toString(), {
-    headers: getServiceHeaders(env),
-  });
-  const rows = await response.json().catch(() => []);
-  if (!response.ok) throw new Error(rows.message || "Não foi possível validar o game seguido.");
-  return rows.length > 0;
+async function deleteUploadedMedia(env, mediaKeys) {
+  await Promise.allSettled([...new Set(mediaKeys)].map((key) => deleteR2Object(env, key)));
 }
 
 async function userHasActiveListingForGame(env, userId, gameId) {
@@ -259,14 +252,22 @@ export async function onRequestPost({ request, env }) {
       : [mediaKey].filter(Boolean);
 
     if (!gameId) {
+      await deleteUploadedMedia(env, mediaKeys);
       return jsonResponse({ error: "Selecione um game." }, { status: 400 });
     }
 
-    if (!body && !mediaUrl) {
+    if (postType === "listing" && !hasValidListingItem(mediaItems)) {
+      await deleteUploadedMedia(env, mediaKeys);
+      return jsonResponse({ error: "Adicione pelo menos um item com nome e preço." }, { status: 400 });
+    }
+
+    if (postType !== "listing" && !body && !mediaUrl) {
+      await deleteUploadedMedia(env, mediaKeys);
       return jsonResponse({ error: "Escreva algo ou envie uma mídia." }, { status: 400 });
     }
 
     if (!isValidMediaKeyForType(postType, mediaKey)) {
+      await deleteUploadedMedia(env, mediaKeys);
       return jsonResponse({ error: "Mídia incompatível com o tipo de publicação." }, { status: 400 });
     }
 
@@ -274,21 +275,9 @@ export async function onRequestPost({ request, env }) {
       ? mediaItems.find((item) => String(item?.mediaType || "").startsWith("video/") && item?.url && item?.key)
       : null;
     const listingHasVideo = Boolean(listingVideoMedia);
-    if (postType === "video" || listingHasVideo) {
-      const verification = await requireDiscordBotVerifiedForVideoUpload(env, auth.user.id);
-      if (verification.error) {
-        await Promise.allSettled([...new Set(mediaKeys)].map((key) => deleteR2Object(env, key)));
-        return verification.error;
-      }
-    }
-
-    const follows = await userFollowsGame(env, auth.user.id, gameId);
-    if (!follows) {
-      return jsonResponse({ error: "Siga este game antes de publicar nele." }, { status: 403 });
-    }
 
     if (postType === "listing" && await userHasActiveListingForGame(env, auth.user.id, gameId)) {
-      await Promise.allSettled([...new Set(mediaKeys)].map((key) => deleteR2Object(env, key)));
+      await deleteUploadedMedia(env, mediaKeys);
       return jsonResponse({ error: "Você já tem um anúncio ativo neste jogo." }, { status: 409 });
     }
 
@@ -317,7 +306,7 @@ export async function onRequestPost({ request, env }) {
 
     return jsonResponse({ post });
   } catch (error) {
-    await Promise.allSettled([...new Set(mediaKeys)].map((key) => deleteR2Object(env, key)));
+    await deleteUploadedMedia(env, mediaKeys);
     console.error("post create failed", error);
     return jsonResponse({ error: error?.message || "Falha ao publicar." }, { status: 500 });
   }

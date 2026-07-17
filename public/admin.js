@@ -8,6 +8,12 @@
     reportFilter: document.querySelector("#admin-report-status-filter"),
     reportFeedback: document.querySelector("#admin-report-feedback"),
     reportList: document.querySelector("#admin-report-list"),
+    ticketFilter: document.querySelector("#admin-ticket-status-filter"),
+    ticketFeedback: document.querySelector("#admin-ticket-feedback"),
+    ticketList: document.querySelector("#admin-ticket-list"),
+    ticketThread: document.querySelector("#admin-ticket-thread"),
+    reportsBadge: document.querySelector("#admin-reports-badge"),
+    ticketsBadge: document.querySelector("#admin-tickets-badge"),
   };
 
   if (!window.GimerrAuth || !els.filter || !els.feedback || !els.list) return;
@@ -17,11 +23,16 @@
     requests: [],
     reports: [],
     reportsLoaded: false,
+    tickets: [],
+    ticketsLoaded: false,
+    selectedTicketId: "",
+    badgesLoading: false,
     taxonomy: {
       genres: [],
       platforms: [],
     },
     taxonomyLoaded: false,
+    taxonomyError: "",
   };
 
   const TAXONOMY_LIMITS = {
@@ -46,6 +57,24 @@
   function setReportFeedback(message, tone = "") {
     els.reportFeedback.textContent = message || "";
     els.reportFeedback.className = `admin-feedback${tone ? ` is-${tone}` : ""}`;
+  }
+
+  function setTicketFeedback(message, tone = "") {
+    els.ticketFeedback.textContent = message || "";
+    els.ticketFeedback.className = `admin-feedback${tone ? ` is-${tone}` : ""}`;
+  }
+
+  function formatBadgeCount(value) {
+    const count = Number(value || 0);
+    if (count >= 100) return "99+";
+    return String(Math.max(0, count));
+  }
+
+  function setTabBadge(element, count) {
+    if (!element) return;
+    const numericCount = Number(count || 0);
+    element.hidden = numericCount <= 0;
+    element.textContent = formatBadgeCount(numericCount);
   }
 
   function formatAdminDate(value) {
@@ -77,15 +106,9 @@
   }
 
   function renderReportMedia(report) {
-    const post = report.post || {};
-    if (!post.exists && report.resolution === "post_deleted") {
-      return `<div class="admin-report-media-placeholder">Post removido</div>`;
-    }
-    if (!post.mediaUrl) return `<div class="admin-report-media-placeholder">Sem mídia</div>`;
-    if (post.mediaType?.startsWith("video/")) {
-      return `<video src="${escapeHtml(post.mediaUrl)}" ${post.thumbnailUrl ? `poster="${escapeHtml(post.thumbnailUrl)}"` : ""} controls playsinline preload="metadata"></video>`;
-    }
-    return `<img src="${escapeHtml(post.mediaUrl)}" alt="Mídia denunciada">`;
+    const attachment = report.attachments?.[0];
+    if (!attachment?.mediaUrl) return `<div class="admin-report-media-placeholder">Sem mídia</div>`;
+    return `<img src="${escapeHtml(attachment.mediaUrl)}" alt="Imagem anexada pelo denunciante">`;
   }
 
   function renderReportCard(report) {
@@ -136,6 +159,245 @@
     els.reportList.innerHTML = state.reports.map(renderReportCard).join("");
   }
 
+  function ticketStatusLabel(status) {
+    if (status === "reopened") return "Reaberto";
+    if (status === "resolved") return "Resolvido";
+    if (status === "closed") return "Encerrado";
+    return "Aberto";
+  }
+
+  function renderTicketButton(ticket) {
+    const requester = ticket.requester;
+    const requesterLabel = requester
+      ? [requester.displayName, requester.username ? `@${requester.username}` : ""].filter(Boolean).join(" · ")
+      : "Usuário indisponível";
+    const latest = ticket.latestMessage?.body || "Sem mensagens no caso.";
+    return `
+      <button class="admin-ticket-item${ticket.id === state.selectedTicketId ? " is-active" : ""}" type="button" data-ticket-id="${escapeHtml(ticket.id)}">
+        <span class="admin-ticket-item-head">
+          <strong>${escapeHtml(ticket.sourceLabel || ticket.title)}</strong>
+          <span class="status-pill ${escapeHtml(ticket.status)}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
+        </span>
+        <span>${escapeHtml(requesterLabel)}</span>
+        <small>${escapeHtml(latest)}</small>
+      </button>
+    `;
+  }
+
+  function renderTickets() {
+    if (!state.tickets.length) {
+      state.selectedTicketId = "";
+      els.ticketList.innerHTML = `<div class="empty-state">Nenhum caso encontrado.</div>`;
+      els.ticketThread.innerHTML = `<div class="empty-state">Selecione um caso para ver a conversa.</div>`;
+      return;
+    }
+    els.ticketList.innerHTML = state.tickets.map(renderTicketButton).join("");
+    if (!state.selectedTicketId || !state.tickets.some((ticket) => ticket.id === state.selectedTicketId)) {
+      state.selectedTicketId = state.tickets[0].id;
+      loadTicketThread(state.selectedTicketId);
+    }
+  }
+
+  function renderTicketMessage(message) {
+    const author = message.author;
+    const label = author ? [author.displayName, author.username ? `@${author.username}` : ""].filter(Boolean).join(" · ") : "Gimerr";
+    return `
+      <article class="admin-ticket-message">
+        <header>
+          <strong>${escapeHtml(label)}</strong>
+          <time>${escapeHtml(formatAdminDate(message.createdAt))}</time>
+        </header>
+        ${message.mediaUrl ? `<a class="admin-ticket-message-image" href="${escapeHtml(message.mediaUrl)}" target="_blank" rel="noopener"><img src="${escapeHtml(message.mediaUrl)}" alt="Imagem anexada à denúncia"></a>` : ""}
+        ${message.body ? `<p>${escapeHtml(message.body)}</p>` : ""}
+      </article>
+    `;
+  }
+
+  function renderTicketSourceMedia(source) {
+    const post = source?.post || {};
+    const imageUrl = post.thumbnailUrl || post.mediaUrl || "";
+    if (imageUrl && /^image\//.test(post.mediaType || "") || post.thumbnailUrl) {
+      return `<img src="${escapeHtml(imageUrl)}" alt="">`;
+    }
+    if (imageUrl) return `<img src="${escapeHtml(imageUrl)}" alt="">`;
+    return `<div class="admin-ticket-source-placeholder">Sem imagem</div>`;
+  }
+
+  function renderTicketSource(source) {
+    if (!source) return "";
+    if (source.type === "post_report") {
+      const profile = source.profile;
+      const profileLabel = profile
+        ? [profile.displayName, profile.username ? `@${profile.username}` : ""].filter(Boolean).join(" · ")
+        : "Autor indisponível";
+      const profileHtml = profile?.id
+        ? `<a class="admin-ticket-source-profile-link" href="./profile?id=${encodeURIComponent(profile.id)}" target="_blank" rel="noopener">${escapeHtml(profileLabel)}</a>`
+        : `<span>${escapeHtml(profileLabel)}</span>`;
+      return `
+        <article class="admin-ticket-source-card">
+          <div class="admin-ticket-source-media">${renderTicketSourceMedia(source)}</div>
+          <div class="admin-ticket-source-body">
+            <strong>${escapeHtml(source.label || "Anúncio denunciado")}</strong>
+            <p>${profileHtml}</p>
+            ${source.post?.body ? `<p>${escapeHtml(source.post.body)}</p>` : ""}
+            <dl>
+              <div><dt>Motivo</dt><dd>${escapeHtml(source.reason || "Sem motivo informado.")}</dd></div>
+              ${source.post?.id ? `<div><dt>Post</dt><dd><a href="./post?id=${encodeURIComponent(source.post.id)}" target="_blank" rel="noopener">Abrir anúncio</a></dd></div>` : ""}
+            </dl>
+          </div>
+        </article>
+      `;
+    }
+    if (source.type === "profile_report") {
+      const profile = source.profile || {};
+      const label = [profile.displayName, profile.username ? `@${profile.username}` : ""].filter(Boolean).join(" · ") || "Perfil indisponível";
+      const profileHref = profile.id ? `./profile?id=${encodeURIComponent(profile.id)}` : "";
+      return `
+        <article class="admin-ticket-source-card">
+          ${profileHref ? `<a class="admin-ticket-source-avatar" href="${profileHref}" target="_blank" rel="noopener">` : `<div class="admin-ticket-source-avatar">`}
+            <img src="${escapeHtml(profile.avatarUrl || "./assets/avatar.svg")}" alt="">
+          ${profileHref ? "</a>" : "</div>"}
+          <div class="admin-ticket-source-body">
+            <strong>${escapeHtml(source.label || "Perfil denunciado")}</strong>
+            <p>${profileHref ? `<a class="admin-ticket-source-profile-link" href="${profileHref}" target="_blank" rel="noopener">${escapeHtml(label)}</a>` : escapeHtml(label)}</p>
+            <dl>
+              <div><dt>Motivo</dt><dd>${escapeHtml(source.reason || "Sem motivo informado.")}</dd></div>
+              ${profile.id ? `<div><dt>Perfil</dt><dd><a href="./profile?id=${encodeURIComponent(profile.id)}" target="_blank" rel="noopener">Abrir perfil</a></dd></div>` : ""}
+            </dl>
+          </div>
+        </article>
+      `;
+    }
+    return "";
+  }
+
+  function renderTicketComposer(ticket) {
+    if (ticket.status === "closed") {
+      return `<p class="admin-ticket-locked">Caso encerrado. O usuário não pode responder nesta conversa.</p>`;
+    }
+    return `
+      <section class="admin-ticket-reply-panel">
+        <label>
+          <span>Responder como Gimerr</span>
+          <textarea rows="3" maxlength="2000" data-ticket-reply-body placeholder="Escreva uma resposta para o denunciante. Ao enviar, ele poderá continuar a conversa até que o caso seja encerrado."></textarea>
+        </label>
+        <div class="admin-ticket-reply-actions">
+          <button class="primary-button" type="button" data-ticket-reply="${escapeHtml(ticket.id)}">Responder e liberar</button>
+          <button class="text-button danger-button" type="button" data-ticket-close="${escapeHtml(ticket.id)}">Encerrar caso</button>
+        </div>
+        <p class="field-feedback${ticket.userCanReply ? " is-success" : ""}">
+          ${ticket.userCanReply ? "O denunciante pode responder agora." : "O denunciante aguarda uma resposta ou liberação do admin."}
+        </p>
+      </section>
+    `;
+  }
+
+  async function loadTickets() {
+    setTicketFeedback("Carregando casos...");
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(`/api/admin-tickets?status=${encodeURIComponent(els.ticketFilter.value)}`, {
+        headers: { accept: "application/json", authorization: `Bearer ${token}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Não foi possível carregar casos.");
+      state.tickets = payload.tickets || [];
+      state.ticketsLoaded = true;
+      setTicketFeedback(`${state.tickets.length} caso(s) carregado(s).`, "success");
+      renderTickets();
+      loadAdminBadges();
+    } catch (error) {
+      setTicketFeedback(error.message || "Falha ao carregar casos.", "error");
+      els.ticketList.innerHTML = "";
+      els.ticketThread.innerHTML = `<div class="empty-state">Não foi possível carregar os casos.</div>`;
+    }
+  }
+
+  async function loadTicketThread(ticketId) {
+    state.selectedTicketId = ticketId;
+    els.ticketList.querySelectorAll("[data-ticket-id]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.ticketId === ticketId);
+    });
+    els.ticketThread.innerHTML = `<div class="empty-state">Carregando conversa...</div>`;
+    try {
+      const token = await getAuthToken();
+      const response = await fetch(`/api/admin-ticket-thread?ticketId=${encodeURIComponent(ticketId)}`, {
+        headers: { accept: "application/json", authorization: `Bearer ${token}` },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Não foi possível carregar conversa.");
+      const ticket = payload.ticket;
+      els.ticketThread.innerHTML = `
+        <header class="admin-ticket-thread-head">
+          <div>
+            <h2>${escapeHtml(ticket.title || "Caso Gimerr")}</h2>
+            <p>Status: ${escapeHtml(ticketStatusLabel(ticket.status))}</p>
+          </div>
+          <span class="status-pill ${escapeHtml(ticket.status)}">${escapeHtml(ticketStatusLabel(ticket.status))}</span>
+        </header>
+        ${renderTicketSource(payload.source)}
+        <div class="admin-ticket-message-list">
+          ${(payload.messages || []).map(renderTicketMessage).join("") || `<div class="empty-state">Sem mensagens.</div>`}
+        </div>
+        ${renderTicketComposer(ticket)}
+      `;
+    } catch (error) {
+      els.ticketThread.innerHTML = `<div class="empty-state">${escapeHtml(error.message || "Falha ao carregar conversa.")}</div>`;
+    }
+  }
+
+  async function replyTicket(ticketId) {
+    const textarea = els.ticketThread.querySelector("[data-ticket-reply-body]");
+    const body = textarea?.value?.trim() || "";
+    if (!body) {
+      textarea?.focus();
+      setTicketFeedback("Escreva uma resposta para o usuário.", "error");
+      return;
+    }
+    try {
+      const token = await getAuthToken();
+      const response = await fetch("/api/admin-ticket-reply", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ ticketId, body }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Não foi possível responder caso.");
+      setTicketFeedback("Resposta enviada.", "success");
+      await loadTickets();
+      await loadTicketThread(ticketId);
+    } catch (error) {
+      setTicketFeedback(error.message || "Falha ao responder caso.", "error");
+    }
+  }
+
+  async function closeTicket(ticketId) {
+    if (!window.confirm("Encerrar este caso? O usuário não poderá reabrir pela conversa atual.")) return;
+    try {
+      const token = await getAuthToken();
+      const response = await fetch("/api/admin-ticket-action", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ ticketId, action: "close" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Não foi possível encerrar caso.");
+      setTicketFeedback("Caso encerrado.", "success");
+      await loadTickets();
+      await loadTicketThread(ticketId);
+    } catch (error) {
+      setTicketFeedback(error.message || "Falha ao encerrar caso.", "error");
+    }
+  }
+
   async function loadReports() {
     setReportFeedback("Carregando denúncias...");
     try {
@@ -149,6 +411,7 @@
       state.reportsLoaded = true;
       setReportFeedback(`${state.reports.length} denúncia(ões) carregada(s).`, "success");
       renderReports();
+      loadAdminBadges();
     } catch (error) {
       setReportFeedback(error.message || "Falha ao carregar denúncias.", "error");
       els.reportList.innerHTML = "";
@@ -186,6 +449,12 @@
       if (!response.ok) throw new Error(payload.error || "Não foi possível aplicar moderação.");
       setReportFeedback("Ação de moderação aplicada.", "success");
       await loadReports();
+      if (state.ticketsLoaded) {
+        await loadTickets();
+        if (state.selectedTicketId && state.tickets.some((ticket) => ticket.id === state.selectedTicketId)) {
+          await loadTicketThread(state.selectedTicketId);
+        }
+      }
     } catch (error) {
       setReportFeedback(error.message || "Falha ao aplicar moderação.", "error");
       buttons.forEach((button) => { button.disabled = false; });
@@ -195,7 +464,39 @@
   function setAdminTab(tab) {
     els.tabs.forEach((button) => button.classList.toggle("is-active", button.dataset.adminTab === tab));
     els.panels.forEach((panel) => { panel.hidden = panel.dataset.adminPanel !== tab; });
-    if (tab === "reports" && !state.reportsLoaded) loadReports();
+    if (tab === "reports") loadReports();
+    if (tab === "tickets") loadTickets();
+  }
+
+  async function loadAdminBadges() {
+    if (state.badgesLoading) return;
+    state.badgesLoading = true;
+    try {
+      const token = await getAuthToken();
+      const headers = { accept: "application/json", authorization: `Bearer ${token}` };
+      const [reportsRes, openTicketsRes, reopenedTicketsRes] = await Promise.all([
+        fetch("/api/admin-post-reports?status=pending", { headers }),
+        fetch("/api/admin-tickets?status=open", { headers }),
+        fetch("/api/admin-tickets?status=reopened", { headers }),
+      ]);
+      const [reportsPayload, openTicketsPayload, reopenedTicketsPayload] = await Promise.all([
+        reportsRes.json().catch(() => ({})),
+        openTicketsRes.json().catch(() => ({})),
+        reopenedTicketsRes.json().catch(() => ({})),
+      ]);
+      if (reportsRes.ok) setTabBadge(els.reportsBadge, reportsPayload.reports?.length || 0);
+      if (openTicketsRes.ok || reopenedTicketsRes.ok) {
+        setTabBadge(
+          els.ticketsBadge,
+          (openTicketsRes.ok ? openTicketsPayload.tickets?.length || 0 : 0)
+            + (reopenedTicketsRes.ok ? reopenedTicketsPayload.tickets?.length || 0 : 0),
+        );
+      }
+    } catch (error) {
+      console.warn("Não foi possível carregar contadores do admin.", error);
+    } finally {
+      state.badgesLoading = false;
+    }
   }
 
   function getSubmitterName(submitter) {
@@ -242,7 +543,7 @@
   function renderTaxonomyOptions(type, selectedItems, canEdit) {
     const items = state.taxonomy[type] || [];
     if (!items.length) {
-      return `<p class="admin-taxonomy-empty">Carregando lista da IGDB...</p>`;
+      return `<p class="admin-taxonomy-empty">${escapeHtml(state.taxonomyError || "Lista da IGDB indisponível.")}</p>`;
     }
 
     const unmatchedSelectedItems = (selectedItems || []).filter((selected) => (
@@ -382,21 +683,30 @@
   async function loadTaxonomy() {
     if (state.taxonomyLoaded) return;
 
-    const [genresRes, platformsRes] = await Promise.all([
-      fetch("/api/igdb/taxonomy?type=genres&limit=500", { headers: { accept: "application/json" } }),
-      fetch("/api/igdb/taxonomy?type=platforms&limit=500", { headers: { accept: "application/json" } }),
-    ]);
-    const [genresPayload, platformsPayload] = await Promise.all([
-      genresRes.json().catch(() => ({})),
-      platformsRes.json().catch(() => ({})),
-    ]);
+    try {
+      const [genresRes, platformsRes] = await Promise.all([
+        fetch("/api/igdb/taxonomy?type=genres&limit=500", { headers: { accept: "application/json" } }),
+        fetch("/api/igdb/taxonomy?type=platforms&limit=500", { headers: { accept: "application/json" } }),
+      ]);
+      const [genresPayload, platformsPayload] = await Promise.all([
+        genresRes.json().catch(() => ({})),
+        platformsRes.json().catch(() => ({})),
+      ]);
 
-    if (!genresRes.ok) throw new Error(genresPayload.error || "Não foi possível carregar gêneros da IGDB.");
-    if (!platformsRes.ok) throw new Error(platformsPayload.error || "Não foi possível carregar plataformas da IGDB.");
+      if (!genresRes.ok) throw new Error(genresPayload.error || "Não foi possível carregar gêneros da IGDB.");
+      if (!platformsRes.ok) throw new Error(platformsPayload.error || "Não foi possível carregar plataformas da IGDB.");
 
-    state.taxonomy.genres = genresPayload.items || [];
-    state.taxonomy.platforms = platformsPayload.items || [];
-    state.taxonomyLoaded = true;
+      state.taxonomy.genres = genresPayload.items || [];
+      state.taxonomy.platforms = platformsPayload.items || [];
+      state.taxonomyError = "";
+    } catch (error) {
+      console.warn("Taxonomia IGDB indisponível no admin.", error);
+      state.taxonomy.genres = [];
+      state.taxonomy.platforms = [];
+      state.taxonomyError = "Lista da IGDB indisponível neste ambiente.";
+    } finally {
+      state.taxonomyLoaded = true;
+    }
   }
 
   async function getAuthToken() {
@@ -515,7 +825,12 @@
 
   async function reviewRequest(card, action) {
     const id = card.dataset.requestId;
-    const note = card.querySelector("textarea")?.value || "";
+    const note = card.querySelector("textarea")?.value?.trim() || "";
+    if (action === "reject" && note.length < 3) {
+      setFeedback("Informe o motivo da reprovação antes de rejeitar a solicitação.", "error");
+      card.querySelector("textarea")?.focus();
+      return;
+    }
     const button = card.querySelector(`[data-admin-action="${action}"]`);
     button.disabled = true;
     button.textContent = action === "approve" ? "Aprovando..." : "Rejeitando...";
@@ -554,6 +869,10 @@
 
   els.filter.addEventListener("change", loadRequests);
   els.reportFilter.addEventListener("change", loadReports);
+  els.ticketFilter.addEventListener("change", () => {
+    state.selectedTicketId = "";
+    loadTickets();
+  });
   els.tabs.forEach((button) => {
     button.addEventListener("click", () => setAdminTab(button.dataset.adminTab));
   });
@@ -563,6 +882,22 @@
     const card = button.closest("[data-report-id]");
     if (!card) return;
     applyReportAction(card, button.dataset.reportAction);
+  });
+  els.ticketList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-ticket-id]");
+    if (!button) return;
+    loadTicketThread(button.dataset.ticketId);
+  });
+  els.ticketThread.addEventListener("click", (event) => {
+    const closeButton = event.target.closest("[data-ticket-close]");
+    if (closeButton) {
+      closeTicket(closeButton.dataset.ticketClose);
+      return;
+    }
+    const replyButton = event.target.closest("[data-ticket-reply]");
+    if (replyButton) {
+      replyTicket(replyButton.dataset.ticketReply);
+    }
   });
   els.list.addEventListener("click", (event) => {
     const button = event.target.closest("[data-admin-action]");
@@ -612,4 +947,5 @@
   }
 
   loadRequests();
+  loadAdminBadges();
 })();

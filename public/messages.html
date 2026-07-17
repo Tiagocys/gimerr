@@ -8,7 +8,7 @@
   <title>Mensagens | Gimerr</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
-<body>
+<body class="messages-page">
   <div class="app-shell">
     <header class="topbar">
       <a class="brand" href="/" aria-label="Gimerr">
@@ -73,7 +73,7 @@
 
       <section class="message-thread" aria-label="Conversa selecionada">
         <header class="message-thread-head is-loading" id="message-thread-head">
-          <div class="message-thread-user">
+          <a class="message-thread-user" id="thread-user-link">
             <span class="conversation-avatar">
               <img id="thread-avatar" src="./assets/avatar.svg" alt="">
             </span>
@@ -81,8 +81,7 @@
               <strong id="thread-title">Marketplace Gimerr</strong>
               <span id="thread-subtitle">Carregando mensagens...</span>
             </div>
-          </div>
-          <a class="text-button" id="thread-profile-link" href="./profile.html" hidden>Ver perfil</a>
+          </a>
         </header>
 
         <div class="message-thread-body" id="message-thread-body">

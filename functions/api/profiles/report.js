@@ -11,44 +11,37 @@ function cleanText(value, maxLength) {
     .slice(0, maxLength);
 }
 
-async function fetchPost(env, postId) {
-  const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
-  url.searchParams.set("select", "id,profile_id,post_type,body,media_url,media_type,video_thumbnail_url,status");
-  url.searchParams.set("id", `eq.${postId}`);
-  url.searchParams.set("status", "eq.active");
+async function fetchProfile(env, profileId) {
+  const url = new URL(`${getSupabaseRestUrl(env)}/profiles`);
+  url.searchParams.set("select", "id,display_name,username,avatar_url,status");
+  url.searchParams.set("id", `eq.${profileId}`);
   url.searchParams.set("limit", "1");
-
-  const response = await fetch(url.toString(), {
-    headers: getServiceHeaders(env),
-  });
+  const response = await fetch(url.toString(), { headers: getServiceHeaders(env) });
   const rows = await response.json().catch(() => []);
-  if (!response.ok) throw new Error(rows.message || "Não foi possível validar o post.");
+  if (!response.ok) throw new Error(rows.message || "Não foi possível validar o perfil.");
   return rows[0] || null;
 }
 
-async function upsertReport(env, payload) {
-  const response = await fetch(`${getSupabaseRestUrl(env)}/post_reports?on_conflict=post_id,reporter_id`, {
+async function fetchExistingReport(env, profileId, reporterId) {
+  const url = new URL(`${getSupabaseRestUrl(env)}/profile_reports`);
+  url.searchParams.set("select", "id,status,created_at");
+  url.searchParams.set("reported_profile_id", `eq.${profileId}`);
+  url.searchParams.set("reporter_id", `eq.${reporterId}`);
+  url.searchParams.set("limit", "1");
+  const response = await fetch(url.toString(), { headers: getServiceHeaders(env) });
+  const rows = await response.json().catch(() => []);
+  if (!response.ok) throw new Error(rows.message || "Não foi possível validar denúncia existente.");
+  return rows[0] || null;
+}
+
+async function createProfileReport(env, payload) {
+  const response = await fetch(`${getSupabaseRestUrl(env)}/profile_reports?on_conflict=reported_profile_id,reporter_id`, {
     method: "POST",
     headers: getServiceHeaders(env, { prefer: "resolution=merge-duplicates,return=representation" }),
     body: JSON.stringify(payload),
   });
   const rows = await response.json().catch(() => []);
   if (!response.ok) throw new Error(rows.message || "Não foi possível registrar a denúncia.");
-  return rows[0] || null;
-}
-
-async function fetchExistingReport(env, postId, reporterId) {
-  const url = new URL(`${getSupabaseRestUrl(env)}/post_reports`);
-  url.searchParams.set("select", "id,status,created_at");
-  url.searchParams.set("post_id", `eq.${postId}`);
-  url.searchParams.set("reporter_id", `eq.${reporterId}`);
-  url.searchParams.set("limit", "1");
-
-  const response = await fetch(url.toString(), {
-    headers: getServiceHeaders(env),
-  });
-  const rows = await response.json().catch(() => []);
-  if (!response.ok) throw new Error(rows.message || "Não foi possível validar denúncia existente.");
   return rows[0] || null;
 }
 
@@ -59,7 +52,7 @@ async function readReportPayload(request) {
     const files = normalizeReportFiles(formData.getAll("attachments"));
     return {
       payload: {
-        postId: formData.get("postId"),
+        profileId: formData.get("profileId"),
         reason: formData.get("reason"),
       },
       files,
@@ -77,40 +70,36 @@ export async function onRequestPost({ request, env }) {
     if (auth.error) return auth.error;
 
     const { payload, files } = await readReportPayload(request);
-    const postId = cleanText(payload.postId, 80);
+    const profileId = cleanText(payload.profileId, 80);
     const reason = cleanText(payload.reason, 500);
+    if (!profileId) return jsonResponse({ error: "Perfil ausente." }, { status: 400 });
+    if (profileId === auth.user.id) return jsonResponse({ error: "Você não pode denunciar seu próprio perfil." }, { status: 400 });
+    if (reason.length < 3) return jsonResponse({ error: "Informe o motivo da denúncia." }, { status: 400 });
 
-    if (!postId) {
-      return jsonResponse({ error: "Post ausente." }, { status: 400 });
-    }
-    if (reason.length < 3) {
-      return jsonResponse({ error: "Informe o motivo da denúncia." }, { status: 400 });
-    }
-
-    const profile = await getProfileVerification(env, auth.user.id);
-    if (!isDiscordBotVerifiedProfile(profile)) {
+    const reporterProfile = await getProfileVerification(env, auth.user.id);
+    if (!isDiscordBotVerifiedProfile(reporterProfile)) {
       return jsonResponse({
         error: "Apenas contas verificadas pelo Discord do Gimerr podem enviar denúncias.",
         code: "report_requires_discord_verification",
       }, { status: 403 });
     }
 
-    const post = await fetchPost(env, postId);
-    if (!post) {
-      return jsonResponse({ error: "Post não encontrado." }, { status: 404 });
+    const target = await fetchProfile(env, profileId);
+    if (!target || target.status === "deleted") {
+      return jsonResponse({ error: "Perfil não encontrado." }, { status: 404 });
     }
 
-    const existingReport = await fetchExistingReport(env, postId, auth.user.id);
+    const existingReport = await fetchExistingReport(env, profileId, auth.user.id);
     if (existingReport) {
       return jsonResponse({
-        error: "Você já enviou uma denúncia para este anúncio.",
+        error: "Você já enviou uma denúncia para este perfil.",
         code: "duplicate_report",
         report: existingReport,
       }, { status: 409 });
     }
 
-    const report = await upsertReport(env, {
-      post_id: postId,
+    const report = await createProfileReport(env, {
+      reported_profile_id: profileId,
       reporter_id: auth.user.id,
       reason,
       status: "pending",
@@ -118,23 +107,22 @@ export async function onRequestPost({ request, env }) {
       resolution_note: null,
       reviewed_at: null,
       reviewed_by: null,
-      reported_profile_id: post.profile_id,
-      reported_post_type: post.post_type,
-      reported_post_body: post.body,
-      reported_media_url: post.media_url,
-      reported_media_type: post.media_type,
-      reported_video_thumbnail_url: post.video_thumbnail_url,
+      reported_display_name: target.display_name,
+      reported_username: target.username,
+      reported_avatar_url: target.avatar_url,
       created_at: new Date().toISOString(),
     });
 
     if (report?.id) {
+      const targetLabel = target.username ? `@${target.username}` : target.display_name || "perfil denunciado";
       const ticketResult = await createAdminTicket(env, {
-        sourceType: "post_report",
+        sourceType: "profile_report",
         sourceId: report.id,
         requesterId: auth.user.id,
-        title: "Denúncia de anúncio",
+        title: "Denúncia de perfil",
         initialMessage: [
           "Recebemos sua denúncia e ela será analisada pela equipe do Gimerr.",
+          `Perfil denunciado: ${targetLabel}`,
           `Motivo informado: ${reason}`,
           "Aguarde uma resposta da equipe antes de complementar este caso.",
         ].join("\n\n"),
@@ -150,7 +138,7 @@ export async function onRequestPost({ request, env }) {
 
     return jsonResponse({ ok: true, report });
   } catch (error) {
-    console.error("post report failed", error);
-    return jsonResponse({ error: error?.message || "Falha ao denunciar post." }, { status: 500 });
+    console.error("profile report failed", error);
+    return jsonResponse({ error: error?.message || "Falha ao denunciar perfil." }, { status: 500 });
   }
 }

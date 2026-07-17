@@ -6,7 +6,7 @@
   const subtitle = document.querySelector("#thread-subtitle");
   const threadBody = document.querySelector("#message-thread-body");
   const threadAvatar = document.querySelector("#thread-avatar");
-  const threadProfileLink = document.querySelector("#thread-profile-link");
+  const threadUserLink = document.querySelector("#thread-user-link");
   const input = document.querySelector("#message-input");
   const sendButton = document.querySelector("#message-send");
   const attachButton = document.querySelector("#message-attach");
@@ -25,6 +25,9 @@
   const MAX_ATTACHMENT_UPLOAD_BYTES = 3 * 1024 * 1024;
   const ATTACHMENT_MAX_DIMENSION = 1600;
   const ATTACHMENT_WEBP_QUALITY = 0.82;
+  const GIMERR_SYSTEM_PROFILE_ID = "00000000-0000-4000-8000-000000000001";
+  const GIMERR_SYSTEM_USERNAMES = new Set(["gimerr_app", "app_gimerr"]);
+  const GIMERR_SYSTEM_AVATAR = "./assets/logo-square-fundo-branco.svg";
 
   const state = {
     session: null,
@@ -76,7 +79,13 @@
   }
 
   function getAvatar(profile) {
+    if (isSystemProfile(profile)) return GIMERR_SYSTEM_AVATAR;
     return profile?.avatarUrl || "./assets/avatar.svg";
+  }
+
+  function isSystemProfile(profile) {
+    const username = String(profile?.username || "").toLowerCase();
+    return profile?.id === GIMERR_SYSTEM_PROFILE_ID || GIMERR_SYSTEM_USERNAMES.has(username);
   }
 
   function getProfileUrl(profile) {
@@ -85,13 +94,30 @@
     return `./profile?id=${encodeURIComponent(profile.id)}`;
   }
 
+  function setThreadUserProfile(profile) {
+    if (!threadUserLink) return;
+    threadUserLink.classList.toggle("is-system-profile", isSystemProfile(profile));
+    threadAvatar?.closest(".conversation-avatar")?.classList.toggle("conversation-avatar-system", isSystemProfile(profile));
+    if ((profile?.id || profile?.username) && !isSystemProfile(profile)) {
+      threadUserLink.href = getProfileUrl(profile);
+      threadUserLink.setAttribute("aria-label", "Ver perfil");
+      threadUserLink.removeAttribute("aria-disabled");
+      return;
+    }
+    threadUserLink.removeAttribute("href");
+    threadUserLink.setAttribute("aria-disabled", "true");
+    threadUserLink.removeAttribute("aria-label");
+  }
+
   function getConversationPerson(conversation) {
     const other = conversation?.otherParticipants?.[0] || null;
+    const systemProfile = isSystemProfile(other);
     return {
       profile: other,
       displayName: other?.displayName || conversation?.title || "Usuário Gimerr",
       username: other?.username || "",
       avatarUrl: getAvatar(other),
+      isSystem: systemProfile,
     };
   }
 
@@ -407,7 +433,7 @@
     title.textContent = "Mensagens";
     subtitle.textContent = "Converse com usuários do Gimerr.";
     if (threadAvatar) threadAvatar.src = "./assets/avatar.svg";
-    if (threadProfileLink) threadProfileLink.hidden = true;
+    setThreadUserProfile(null);
     threadBody.innerHTML = `
       <article class="message-bubble is-system">
         <p>${escapeHtml(message)}</p>
@@ -477,7 +503,7 @@
       const preview = conversation.subtitle || "Sem mensagens ainda.";
       return `
         <button class="conversation-item${conversation.id === state.activeConversationId ? " is-active" : ""}${conversation.unread ? " is-unread" : ""}" type="button" data-conversation-id="${escapeHtml(conversation.id)}">
-          <span class="conversation-avatar">
+          <span class="conversation-avatar${person.isSystem ? " conversation-avatar-system" : ""}">
             <img src="${escapeHtml(person.avatarUrl)}" alt="">
           </span>
           <span class="conversation-copy">
@@ -493,6 +519,7 @@
 
   function renderThreadLoading() {
     setThreadHeadLoading(true);
+    setThreadUserProfile(null);
     threadBody.innerHTML = `
       <article class="message-bubble is-system">
         <p>Carregando conversa...</p>
@@ -512,10 +539,7 @@
     const usernameLabel = getUsernameLabel(person.username);
     const context = getConversationContext(conversation);
     if (threadAvatar) threadAvatar.src = person.avatarUrl;
-    if (threadProfileLink) {
-      threadProfileLink.hidden = !person.profile?.id;
-      threadProfileLink.href = getProfileUrl(person.profile);
-    }
+    setThreadUserProfile(person.profile);
     title.textContent = person.displayName;
     subtitle.textContent = [usernameLabel, context].filter(Boolean).join(" · ") || "Conversa do Gimerr";
     setThreadHeadLoading(false);

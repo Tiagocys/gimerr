@@ -43,17 +43,21 @@
 
           <div class="profile-actions">
             <a class="text-button" id="edit-profile-link" href="./edit-profile.html">Editar perfil</a>
-            <a class="text-button" id="profile-message-link" href="./messages.html" hidden>Enviar mensagem</a>
-            <button class="primary-button" id="follow-button" type="button">Seguir</button>
-            <button class="text-button" id="recommend-button" type="button">Recomendar</button>
+            <a class="text-button profile-message-action-button" id="profile-message-link" href="./messages.html" hidden>
+              <img src="./assets/message.svg" alt="" aria-hidden="true">
+              <span>Enviar mensagem</span>
+            </a>
+            <button class="text-button recommend-action-button" id="recommend-button" type="button">
+              <img src="./assets/rec.svg" alt="" aria-hidden="true">
+              <span>Recomendar</span>
+            </button>
+            <button class="text-button profile-report-action-button" id="profile-report-button" type="button" hidden>
+              <span>Denunciar perfil</span>
+            </button>
           </div>
         </div>
 
         <div class="profile-stats" aria-label="Métricas do perfil">
-          <button class="stat-button" id="followers-button" type="button">
-            <strong id="followers-count">0</strong>
-            <span>seguidores</span>
-          </button>
           <button class="stat-button" id="recommendations-button" type="button">
             <strong id="recommendations-count">0</strong>
             <span>recomendações</span>
@@ -71,6 +75,11 @@
             <h2>Conteúdo</h2>
             <p id="profile-feed-subtitle">Posts criados e compartilhados.</p>
           </div>
+        </div>
+
+        <div class="filter-bar" aria-label="Filtrar conteúdo do perfil">
+          <button class="filter-chip is-active" type="button" data-profile-feed-filter="all">Tudo</button>
+          <button class="filter-chip" type="button" data-profile-feed-filter="listing">Marketplace</button>
         </div>
 
         <div class="feed-list" id="profile-feed-list"></div>
@@ -92,6 +101,12 @@
     </section>
   </div>
 
+  <div class="modal-backdrop" id="listing-detail-modal" hidden>
+    <section class="listing-detail-modal" role="dialog" aria-modal="true" aria-labelledby="listing-detail-title">
+      <div id="listing-detail-content"></div>
+    </section>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./auth-client.js"></script>
   <script src="./user-search.js" defer></script>
@@ -100,6 +115,7 @@
   <script src="./media-lightbox.js" defer></script>
   <script src="./vendor/qrcode.js" defer></script>
   <script src="./share-modal.js" defer></script>
+  <script src="./report-modal.js" defer></script>
   <script src="./profile.js" defer></script>
 </body>
 </html>

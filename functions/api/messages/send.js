@@ -1,4 +1,5 @@
 import { jsonResponse, requireAuthUser } from "../../_shared/auth.js";
+import { assertCanReplyToTicket, registerTicketReply } from "../../_shared/admin-tickets.js";
 import { cleanMessageText, cleanUuid, mutateRows, requireConversationParticipant, touchConversationRead } from "../../_shared/messages.js";
 
 function cleanText(value, maxLength = 500) {
@@ -37,6 +38,7 @@ export async function onRequestPost({ request, env }) {
 
     const ownParticipant = await requireConversationParticipant(env, conversationId, auth.user.id);
     if (!ownParticipant) return jsonResponse({ error: "Conversa não encontrada." }, { status: 404 });
+    await assertCanReplyToTicket(env, conversationId, auth.user.id);
 
     const [message] = await mutateRows(env, "conversation_messages", {
       body: {
@@ -60,6 +62,7 @@ export async function onRequestPost({ request, env }) {
         prefer: "return=minimal",
       }),
       touchConversationRead(env, conversationId, auth.user.id),
+      registerTicketReply(env, conversationId, auth.user.id),
     ]);
 
     return jsonResponse({
@@ -77,6 +80,6 @@ export async function onRequestPost({ request, env }) {
     });
   } catch (error) {
     console.error("messages send failed", error);
-    return jsonResponse({ error: error?.message || "Falha ao enviar mensagem." }, { status: 500 });
+    return jsonResponse({ error: error?.message || "Falha ao enviar mensagem." }, { status: error?.status || 500 });
   }
 }

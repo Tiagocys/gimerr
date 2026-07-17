@@ -150,6 +150,8 @@ export async function onRequestPost({ request, env }) {
       media_url: readyUrl,
       media_key: readyKey,
       media_type: readyType,
+      original_media_url: null,
+      original_media_key: null,
       ready_media_url: readyUrl,
       ready_media_key: readyKey,
       ...(nextMediaItems ? { media_items: nextMediaItems } : {}),

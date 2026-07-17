@@ -797,6 +797,13 @@
     gameRequestModal.open(term);
   }
 
+  window.GimerrGameRequest = {
+    open: openGameRequestModal,
+  };
+  window.addEventListener("gimerr:open-game-request", (event) => {
+    openGameRequestModal(event.detail?.term || "");
+  });
+
   function createSearchController(input) {
     const shell = input.closest(".search-box");
     if (!shell) return null;

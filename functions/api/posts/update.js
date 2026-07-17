@@ -1,6 +1,5 @@
 import { deleteR2Object, getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
-import { requireDiscordBotVerifiedForVideoUpload } from "../../_shared/verification.js";
 
 const MAX_LISTING_MEDIA_ITEMS = 15;
 const MAX_LISTING_VIDEO_ITEMS = 1;
@@ -84,6 +83,11 @@ function normalizeMediaItems(items) {
   return normalized;
 }
 
+function hasValidListingItem(items) {
+  return (Array.isArray(items) ? items : [])
+    .some((item) => cleanText(item?.itemName, 120) && cleanText(item?.priceLabel, 80));
+}
+
 async function fetchPost(env, postId) {
   const url = new URL(`${getSupabaseRestUrl(env)}/feed_posts`);
   url.searchParams.set("select", "id,profile_id,post_type,status,media_items,original_media_key,ready_media_key,video_thumbnail_key");
@@ -136,32 +140,34 @@ export async function onRequestPost({ request, env }) {
     const payload = await request.json().catch(() => ({}));
     const postId = cleanText(payload.postId, 80);
     const body = cleanBodyText(payload.body, 1200);
-    if (!postId) return jsonResponse({ error: "Anúncio ausente." }, { status: 400 });
+    if (!postId) return jsonResponse({ error: "Post ausente." }, { status: 400 });
+
+    const post = await fetchPost(env, postId);
+    if (!post || post.status !== "active") {
+      return jsonResponse({ error: "Post não encontrado." }, { status: 404 });
+    }
+    if (post.profile_id !== auth.user.id) {
+      return jsonResponse({ error: "Você só pode editar seus próprios posts." }, { status: 403 });
+    }
+
+    if (post.post_type !== "listing") {
+      const updated = await updatePost(env, postId, { body });
+      return jsonResponse({ post: updated });
+    }
 
     if (Array.isArray(payload.mediaItems) && payload.mediaItems.length > MAX_LISTING_MEDIA_ITEMS + MAX_LISTING_VIDEO_ITEMS) {
       return jsonResponse({ error: "Anúncios aceitam até 15 imagens e 1 vídeo." }, { status: 400 });
     }
 
-    const post = await fetchPost(env, postId);
-    if (!post || post.status !== "active" || post.post_type !== "listing") {
-      return jsonResponse({ error: "Anúncio não encontrado." }, { status: 404 });
-    }
-    if (post.profile_id !== auth.user.id) {
-      return jsonResponse({ error: "Você só pode editar seus próprios anúncios." }, { status: 403 });
-    }
-    if (!body) {
-      return jsonResponse({ error: "Informe pelo menos um item no anúncio." }, { status: 400 });
+    const mediaItems = normalizeMediaItems(payload.mediaItems);
+    if (!hasValidListingItem(mediaItems)) {
+      return jsonResponse({ error: "Adicione pelo menos um item com nome e preço." }, { status: 400 });
     }
 
-    const mediaItems = normalizeMediaItems(payload.mediaItems);
     const previousVideoItems = getVideoMediaItems(post.media_items);
     const nextVideoItems = getVideoMediaItems(mediaItems);
     const nextVideoMedia = nextVideoItems[0] || null;
     const videoChanged = !hasSameKeys(previousVideoItems, nextVideoItems);
-    if (nextVideoItems.length) {
-      const verification = await requireDiscordBotVerifiedForVideoUpload(env, auth.user.id);
-      if (verification.error) return verification.error;
-    }
     const primaryMedia = mediaItems.find((item) => item?.url && item?.key) || null;
     const videoPayload = videoChanged
       ? {

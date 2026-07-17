@@ -1,5 +1,4 @@
 import { createR2PresignedPutUrl, hasR2Bucket, jsonResponse, requireAuthUser } from "../_shared/auth.js";
-import { requireDiscordBotVerifiedForVideoUpload } from "../_shared/verification.js";
 
 const TARGETS = {
   video: {
@@ -46,11 +45,6 @@ export async function onRequestPost({ request, env }) {
 
     if (!config) {
       return jsonResponse({ error: "Tipo de publicação inválido para upload direto." }, { status: 400 });
-    }
-
-    if (target === "video") {
-      const verification = await requireDiscordBotVerifiedForVideoUpload(env, auth.user.id);
-      if (verification.error) return verification.error;
     }
 
     if (!config.accept.test(type)) {

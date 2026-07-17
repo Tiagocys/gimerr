@@ -31,7 +31,14 @@
     <main class="admin-layout">
       <nav class="admin-tabs" aria-label="Áreas administrativas">
         <button class="filter-chip is-active" type="button" data-admin-tab="games">Solicitações de jogos</button>
-        <button class="filter-chip" type="button" data-admin-tab="reports">Denúncias</button>
+        <button class="filter-chip" type="button" data-admin-tab="reports">
+          <span>Denúncias</span>
+          <span class="filter-count admin-tab-badge" id="admin-reports-badge" hidden>0</span>
+        </button>
+        <button class="filter-chip" type="button" data-admin-tab="tickets">
+          <span>Caixa de mensagens</span>
+          <span class="filter-count admin-tab-badge" id="admin-tickets-badge" hidden>0</span>
+        </button>
       </nav>
 
       <section class="admin-panel" data-admin-panel="games">
@@ -67,6 +74,30 @@
 
         <p class="admin-feedback" id="admin-report-feedback" role="status">Abra esta aba para carregar denúncias.</p>
         <section class="admin-report-list" id="admin-report-list" aria-label="Lista de denúncias"></section>
+      </section>
+
+      <section class="admin-panel" data-admin-panel="tickets" hidden>
+        <section class="admin-head">
+          <div>
+            <h1>Caixa de mensagens</h1>
+            <p>Casos de denúncias e solicitações de jogos reabertas pela comunidade.</p>
+          </div>
+          <select id="admin-ticket-status-filter" aria-label="Filtrar casos">
+            <option value="open">Abertos</option>
+            <option value="reopened">Reabertos</option>
+            <option value="resolved">Resolvidos</option>
+            <option value="closed">Encerrados</option>
+            <option value="all">Todos</option>
+          </select>
+        </section>
+
+        <p class="admin-feedback" id="admin-ticket-feedback" role="status">Abra esta aba para carregar mensagens.</p>
+        <section class="admin-ticket-inbox" aria-label="Caixa de casos">
+          <div class="admin-ticket-list" id="admin-ticket-list"></div>
+          <article class="admin-ticket-thread" id="admin-ticket-thread">
+            <div class="empty-state">Selecione um caso para ver a conversa.</div>
+          </article>
+        </section>
       </section>
     </main>
   </div>

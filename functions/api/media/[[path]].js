@@ -6,6 +6,7 @@ const ALLOWED_PREFIXES = [
   "market/",
   "posts/",
   "profile-pics/",
+  "report-pics/",
   "videos/",
 ];
 

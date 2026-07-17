@@ -281,14 +281,32 @@ async function handleVerifyInteraction({ apiBase, token, interaction }) {
     return;
   }
 
-  await deferInteraction(interaction);
+  try {
+    await deferInteraction(interaction);
+  } catch (error) {
+    console.error(`[discord-verify-bot] não foi possível responder a interação ${interaction.id} a tempo`, error);
+    return;
+  }
 
-  const { response, payload } = await callVerifyBackend({
-    apiBase,
-    token,
-    discordId,
-    discordUsername: user.global_name || user.username || "",
-  });
+  let response;
+  let payload;
+  try {
+    ({ response, payload } = await callVerifyBackend({
+      apiBase,
+      token,
+      discordId,
+      discordUsername: user.global_name || user.username || "",
+    }));
+  } catch (error) {
+    await editInteractionResponse(
+      interaction,
+      "Não foi possível criar seu link de verificação agora. Tente novamente em alguns instantes.",
+    ).catch((editError) => {
+      console.error("[discord-verify-bot] não foi possível editar resposta de falha", editError);
+    });
+    console.error(`[discord-verify-bot] backend indisponível para ${discordId}`, error);
+    return;
+  }
 
   if (response.ok) {
     await editInteractionResponse(
@@ -407,7 +425,7 @@ function connectGateway() {
     }
 
     if (packet.t === "INTERACTION_CREATE") {
-      await handleVerifyInteraction({ apiBase, token, interaction: packet.d }).catch((error) => {
+      handleVerifyInteraction({ apiBase, token, interaction: packet.d }).catch((error) => {
         console.error("[discord-verify-bot] erro ao processar botão de verificação", error);
       });
       return;

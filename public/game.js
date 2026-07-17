@@ -19,10 +19,13 @@
     followerCount: 0,
     following: false,
     feed: [],
-    filter: "listing",
+    filter: "all",
+    marketplaceSearch: "",
     activeCommentPostId: "",
     activeCommentsPostId: "",
     commentSubmittingPostId: "",
+    editingPostId: "",
+    editSubmittingPostId: "",
     replyingToCommentId: "",
     commentsLoadingPostId: "",
     commentsByPost: {},
@@ -32,6 +35,7 @@
     composerSelectedFiles: [],
     listingCurrency: "",
     listingItemDrafts: [],
+    listingSellerCache: new Map(),
     commentMention: {
       active: false,
       start: -1,
@@ -61,6 +65,9 @@
     followersList: document.querySelector("#game-followers-list"),
     feedList: document.querySelector("#game-feed-list"),
     filterButtons: document.querySelectorAll("[data-game-feed-filter]"),
+    marketplaceSearchWrap: document.querySelector("#game-marketplace-feed-search"),
+    marketplaceSearchLabel: document.querySelector("#game-marketplace-search-label"),
+    marketplaceSearch: document.querySelector("#game-marketplace-search"),
     feedSubtitle: document.querySelector("#game-feed-subtitle"),
     composer: document.querySelector("#game-composer"),
     composerText: document.querySelector("#game-composer-text"),
@@ -78,6 +85,8 @@
     listingItemAdd: document.querySelector("#game-listing-item-add"),
     publishPost: document.querySelector("#game-publish-post"),
     composerFeedback: document.querySelector("#game-composer-feedback"),
+    listingDetailModal: document.querySelector("#listing-detail-modal"),
+    listingDetailContent: document.querySelector("#listing-detail-content"),
   };
 
   if (!window.GimerrAuth || !els.title) return;
@@ -129,6 +138,13 @@
   function getCurrentGameUrl() {
     if (state.game?.slug) return `./game?slug=${encodeURIComponent(state.game.slug)}`;
     return `./game?id=${encodeURIComponent(state.game?.igdbId || "")}`;
+  }
+
+  function getGameUrl(game) {
+    if (!game) return getCurrentGameUrl();
+    return game.slug
+      ? `./game?slug=${encodeURIComponent(game.slug)}`
+      : `./game?id=${encodeURIComponent(game.id || game.igdbId || state.game?.igdbId || "")}`;
   }
 
   function normalizeFollowedProfile(profile) {
@@ -596,7 +612,9 @@
 
   function renderPostMenu(post) {
     const postId = escapeHtml(post.id);
-    const isOwner = state.session?.user?.id && post.author?.id === state.session.user.id;
+    const ownerId = post.author?.id || post.profileId || post.profile_id || "";
+    const isOwner = state.session?.user?.id && String(ownerId) === String(state.session.user.id);
+    const isListing = post.type === "listing";
     return `
       <div class="post-menu" data-post-menu>
         <button class="ghost-icon post-menu-button" type="button" data-post-menu-toggle data-post-id="${postId}" aria-label="Abrir menu do post" aria-expanded="false">
@@ -604,7 +622,9 @@
       </button>
       <div class="post-menu-popover" hidden>
           ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
-          ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Apagar post</button>` : ""}
+          ${isOwner && isListing ? `<a href="./?editListing=${encodeURIComponent(post.id)}">Editar</a>` : ""}
+          ${isOwner && !isListing ? `<button type="button" data-post-edit data-post-id="${postId}">Editar</button>` : ""}
+          ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Excluir</button>` : ""}
         </div>
       </div>
     `;
@@ -636,21 +656,10 @@
       return;
     }
 
-    const reason = window.prompt("Informe o motivo da denúncia. Você pode deixar em branco.");
-    if (reason === null) return;
-
-    const response = await fetch("/api/posts/report", {
-      method: "POST",
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${state.session.access_token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ postId, reason }),
+    window.GimerrReport?.open({
+      postId,
+      token: state.session.access_token,
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "Não foi possível denunciar este post.");
-    window.alert("Denúncia enviada.");
   }
 
   function getPostShareUrl(postId) {
@@ -681,6 +690,8 @@
     const post = state.feed.find((item) => String(item.id) === String(postId));
     const title = post?.type === "video"
       ? `Veja este vídeo no Gimerr`
+      : post?.type === "listing"
+        ? `Veja este anúncio no Gimerr`
       : `Veja este post no Gimerr`;
 
     if (window.GimerrShare?.openPostShare) {
@@ -711,14 +722,131 @@
     return count === 1 ? "1 visualização" : `${formatted} visualizações`;
   }
 
+  function formatListingItemCount(count) {
+    const value = Number(count || 0);
+    if (value === 1) return "1 item";
+    return `${new Intl.NumberFormat("pt-BR").format(value)} itens`;
+  }
+
+  function formatListingViewCount(value) {
+    const count = Number(value || 0);
+    if (count >= 1000) return `${new Intl.NumberFormat("pt-BR").format(Math.floor(count / 1000))}k`;
+    return new Intl.NumberFormat("pt-BR").format(count);
+  }
+
+  function formatListingViewBadge(value) {
+    const count = Number(value || 0);
+    return `${formatListingViewCount(count)} ${count === 1 ? "visualização" : "visualizações"}`;
+  }
+
+  function formatListingRelativeTime(value) {
+    const formatted = formatRelativeTime(value);
+    return formatted === "agora" ? "Agora" : formatted;
+  }
+
+  function parseListingBody(body, mediaItems = []) {
+    const text = String(body || "");
+    const marker = "\n\nItens:\n";
+    const markerIndex = text.indexOf(marker);
+    const description = markerIndex >= 0 ? text.slice(0, markerIndex).trim() : "";
+    const itemsText = markerIndex >= 0 ? text.slice(markerIndex + marker.length) : text.replace(/^Itens:\n/i, "");
+    const lines = itemsText.split("\n").map((line) => line.trim()).filter(Boolean);
+    const imageItems = mediaItems.filter((item) => String(item?.mediaType || "").startsWith("image/"));
+    const mediaByPosition = new Map(imageItems
+      .filter((item) => Number.isInteger(Number(item?.position)))
+      .map((item) => [Number(item.position), item]));
+    const mediaByName = new Map(imageItems
+      .filter((item) => item?.itemName)
+      .map((item) => [String(item.itemName).toLowerCase(), item]));
+    const items = lines.map((line, index) => {
+      const [namePart, ...priceParts] = line.split(/\s+-\s+/);
+      const mediaItem = mediaByPosition.get(index) || mediaByName.get(String(namePart || "").toLowerCase()) || null;
+      return {
+        name: namePart || mediaItem?.itemName || "",
+        priceLabel: priceParts.join(" - ") || mediaItem?.priceLabel || "",
+        previewUrl: mediaItem?.url || "",
+        mediaItem,
+      };
+    });
+    return { description, items };
+  }
+
+  function getListingCardData(post) {
+    const mediaItems = Array.isArray(post?.mediaItems) ? post.mediaItems : getPostMediaItems(post);
+    const parsed = parseListingBody(post?.body || "", mediaItems);
+    return {
+      ...parsed,
+      itemCount: parsed.items.filter((item) => item.name || item.priceLabel || item.previewUrl || item.mediaItem).length,
+    };
+  }
+
+  function getListingCardPreviewText(listingData) {
+    const text = listingData?.description || listingData?.items?.find((item) => item.name)?.name || "";
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    return clean.length > 58 ? `${clean.slice(0, 58).trim()}...` : clean;
+  }
+
+  function renderPostTextBlock(post, textHtml) {
+    if (post.type === "listing") {
+      return textHtml ? `<p class="post-text">${textHtml}</p>` : "";
+    }
+    const postId = String(post?.id || "");
+    const isEditing = state.editingPostId === postId;
+    const isSubmitting = state.editSubmittingPostId === postId;
+    if (!isEditing) return textHtml ? `<p class="post-text">${textHtml}</p>` : "";
+    return `
+      <form class="post-edit-form" data-post-edit-form data-post-id="${escapeHtml(postId)}">
+        <textarea class="post-edit-textarea" name="body" maxlength="1200" rows="4">${escapeHtml(post.body || "")}</textarea>
+        <div class="post-edit-actions">
+          <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>${isSubmitting ? "Salvando..." : "Salvar"}</button>
+          <button class="text-button" type="button" data-post-edit-cancel data-post-id="${escapeHtml(postId)}" ${isSubmitting ? "disabled" : ""}>Cancelar</button>
+        </div>
+      </form>
+    `;
+  }
+
+  function renderListingMedia(post) {
+    const items = getPostMediaItems(post);
+    const firstImage = items.find((item) => String(item?.mediaType || "").startsWith("image/"));
+    const itemCount = getListingCardData(post).itemCount;
+    const countLabel = formatListingItemCount(itemCount);
+    const postId = escapeHtml(post.id || "");
+    const openAttrs = `type="button" data-listing-open data-post-id="${postId}" aria-label="Ver anúncio"`;
+    const overlays = `
+      <span class="listing-preview-views" data-listing-view-count data-post-id="${postId}">${escapeHtml(formatListingViewBadge(post.listingViewCount))}</span>
+      <button class="listing-preview-share" type="button" data-post-share data-post-id="${postId}" aria-label="Compartilhar anúncio">
+        <img src="./assets/share-2.svg" alt="" aria-hidden="true">
+      </button>
+    `;
+    if (!firstImage?.url) {
+      return `
+        <div class="listing-preview-frame">
+          <button class="listing-preview-button listing-placeholder-card" ${openAttrs}>
+            <span class="listing-placeholder-title">Sem imagens</span>
+            <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
+          </button>
+          ${overlays}
+        </div>
+      `;
+    }
+    return `
+      <div class="listing-preview-frame">
+        <button class="listing-preview-button" ${openAttrs}>
+          <img src="${escapeHtml(firstImage.url)}" alt="">
+          <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
+        </button>
+        ${overlays}
+      </div>
+    `;
+  }
+
   function renderPostActions(post) {
     const postId = escapeHtml(post.id);
     if (post.type === "listing") {
       return `
-        <div class="post-action-bar post-action-bar--listing">
-          <button class="post-action-button" type="button" data-post-share data-post-id="${postId}">
-            Compartilhar
-          </button>
+        <div class="post-action-bar post-action-bar--listing listing-card-meta">
+          <span>${escapeHtml(formatListingRelativeTime(post.createdAt))}</span>
+          ${renderPostMenu(post)}
         </div>
       `;
     }
@@ -739,6 +867,324 @@
       ${renderInlineCommentsPanel(post)}
       ${renderInlineCommentForm(post)}
     `;
+  }
+
+  function formatCountLabel(value, singular, plural) {
+    const count = Number(value || 0);
+    const formatted = new Intl.NumberFormat("pt-BR").format(count);
+    return count === 1 ? `1 ${singular}` : `${formatted} ${plural}`;
+  }
+
+  function getWhatsappUrl(phone) {
+    const digits = String(phone || "").replace(/\D/g, "");
+    return digits ? `https://wa.me/${digits}` : "";
+  }
+
+  function getPhoneLabel(phone) {
+    return String(phone || "").replace(/^\+/, "+");
+  }
+
+  function getPlatformMeta(platform) {
+    const id = String(platform || "").trim().toLowerCase();
+    if (id === "discord") return { id, label: "Discord", icon: "./assets/discord.svg" };
+    if (id === "twitch") return { id, label: "Twitch", icon: "./assets/twitch.svg" };
+    return { id: id || "platform", label: platform || "Plataforma", icon: "" };
+  }
+
+  function renderSellerContacts(details) {
+    const profile = details?.profile || {};
+    const links = Array.isArray(details?.platformLinks) ? details.platformLinks : [];
+    const contactItems = [];
+    if (profile.phone_e164) {
+      contactItems.push(`<a href="tel:${escapeHtml(profile.phone_e164)}">Telefone: ${escapeHtml(getPhoneLabel(profile.phone_e164))}</a>`);
+      if (profile.phone_contact_whatsapp) {
+        const whatsappUrl = getWhatsappUrl(profile.phone_e164);
+        if (whatsappUrl) {
+          contactItems.push(`
+            <a class="info-pill contact-pill whatsapp-contact-pill" href="${escapeHtml(whatsappUrl)}" target="_blank" rel="noopener">
+              <img src="./assets/whatsapp.svg" alt="">
+              WhatsApp
+            </a>
+          `);
+        }
+      }
+      if (profile.phone_contact_telegram) {
+        const phoneDigits = String(profile.phone_e164 || "").replace(/\D/g, "");
+        if (phoneDigits) {
+          contactItems.push(`
+            <a class="info-pill contact-pill telegram-contact-button" href="tg://resolve?phone=${escapeHtml(phoneDigits)}">
+              <img src="./assets/telegram.svg" alt="">
+              Telegram
+            </a>
+          `);
+        }
+      }
+    }
+    links.forEach((link) => {
+      const platformMeta = getPlatformMeta(link.platform);
+      const handle = link.handle || platformMeta.label;
+      const label = `${platformMeta.label}${link.handle ? `: ${link.handle}` : ""}`;
+      if (link.profile_url) {
+        contactItems.push(`
+          <a class="info-pill platform-pill platform-pill-${escapeHtml(platformMeta.id)}" href="${escapeHtml(link.profile_url)}" target="_blank" rel="noopener" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+            ${platformMeta.icon ? `<img src="${escapeHtml(platformMeta.icon)}" alt="">` : ""}
+            <span>${escapeHtml(handle)}</span>
+          </a>
+        `);
+      } else {
+        contactItems.push(`
+          <span class="info-pill platform-pill platform-pill-${escapeHtml(platformMeta.id)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+            ${platformMeta.icon ? `<img src="${escapeHtml(platformMeta.icon)}" alt="">` : ""}
+            <span>${escapeHtml(handle)}</span>
+          </span>
+        `);
+      }
+    });
+    return contactItems.length
+      ? contactItems.map((item) => `<li>${item}</li>`).join("")
+      : `<li><span>Sem contatos públicos.</span></li>`;
+  }
+
+  function getListingGame(post) {
+    return post?.game || {
+      id: state.game?.igdbId || state.game?.id || "",
+      slug: state.game?.slug || "",
+      name: state.game?.name || "Game",
+      coverUrl: state.game?.coverUrl || "./assets/avatar.svg",
+    };
+  }
+
+  function renderListingDetail(post, sellerDetails = null) {
+    const listingData = getListingCardData(post);
+    const game = getListingGame(post);
+    const author = post.author || {};
+    const sellerProfile = sellerDetails?.profile || {};
+    const stats = sellerDetails?.stats || {};
+    const sellerName = sellerProfile.display_name || author.displayName || author.username || "Vendedor Gimerr";
+    const sellerUsername = sellerProfile.username || author.username || "";
+    const sellerAvatar = sellerProfile.avatar_url || author.avatarUrl || "./assets/avatar.svg";
+    const canMessageSeller = author.id && author.id !== state.session?.user?.id;
+    const mediaItems = getPostMediaItems(post);
+    const listingVideo = mediaItems.find((item) => String(item?.mediaType || "").startsWith("video/"));
+    const items = listingData.items.filter((item) => item.name || item.price || item.priceLabel || item.mediaItem || item.previewUrl);
+    const galleryItems = items
+      .filter((item) => item.previewUrl)
+      .map((item, index) => ({
+        url: item.previewUrl,
+        alt: item.name ? `Imagem do item ${item.name}` : `Imagem do item ${index + 1}`,
+      }));
+    const itemList = items.map((item) => {
+      const galleryIndex = item.previewUrl
+        ? galleryItems.findIndex((galleryItem) => galleryItem.url === item.previewUrl)
+        : -1;
+      const imageAlt = item.name ? `Imagem do item ${item.name}` : "Imagem do item";
+      return `
+        <article class="listing-detail-item">
+          ${item.previewUrl ? `
+            <button class="listing-detail-item-media" type="button" data-image-src="${escapeHtml(item.previewUrl)}" data-image-index="${Math.max(0, galleryIndex)}" data-image-items="${escapeHtml(JSON.stringify(galleryItems))}" ${renderImageLightboxAttrs(post, imageAlt)} aria-label="Ampliar imagem do item">
+              <img src="${escapeHtml(item.previewUrl)}" alt="">
+            </button>
+          ` : `
+            <div class="listing-detail-item-media">
+              <span>Sem imagem</span>
+            </div>
+          `}
+          <div>
+            <strong>${escapeHtml(item.name || "Item")}</strong>
+            ${item.priceLabel ? `<span>${escapeHtml(item.priceLabel)}</span>` : ""}
+          </div>
+        </article>
+      `;
+    }).join("");
+
+    return `
+      <div class="listing-detail-grid">
+        <div class="listing-detail-actions">
+          <button class="ghost-icon listing-detail-close" type="button" data-listing-close aria-label="Voltar">x</button>
+          <button class="post-action-button" type="button" data-post-share data-post-id="${escapeHtml(post.id)}">Compartilhar</button>
+          ${renderPostMenu(post)}
+        </div>
+        <section class="listing-detail-main">
+          <div>
+            <a class="channel-line" href="${getGameUrl(game)}">
+              <span class="channel-game-logo" aria-hidden="true">
+                <img src="${escapeHtml(game?.coverUrl || "./assets/avatar.svg")}" alt="">
+              </span>
+              <span>Em ${escapeHtml(game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
+            </a>
+            <h2 id="listing-detail-title">${escapeHtml(formatListingItemCount(listingData.itemCount))}</h2>
+            ${listingData.description ? `<p class="listing-detail-description">${escapeHtml(listingData.description)}</p>` : ""}
+          </div>
+          ${listingVideo ? renderVideoPoster(post, listingVideo) : ""}
+          <div class="listing-detail-items">
+            ${itemList || `<p class="empty-state">Nenhum item informado.</p>`}
+          </div>
+        </section>
+        <aside class="listing-detail-seller">
+          <a class="listing-seller-head" href="${getProfileUrl({ id: author.id, username: sellerUsername })}">
+            <img src="${escapeHtml(sellerAvatar)}" alt="">
+            <span>
+              <strong>${escapeHtml(sellerName)}</strong>
+              ${sellerUsername ? `<small>@${escapeHtml(sellerUsername)}</small>` : ""}
+            </span>
+          </a>
+          <div class="listing-seller-stats">
+            <span>${escapeHtml(formatCountLabel(stats.recommendations_count, "recomendação", "recomendações"))}</span>
+          </div>
+          ${canMessageSeller ? `
+            <a class="primary-button listing-message-button message-action-button" href="./messages?listingPostId=${encodeURIComponent(post.id)}">
+              <img src="./assets/message.svg" alt="" aria-hidden="true">
+              <span>Enviar mensagem</span>
+            </a>
+          ` : ""}
+          <div class="listing-seller-contact">
+            <strong>Contato</strong>
+            <ul>${renderSellerContacts(sellerDetails)}</ul>
+          </div>
+        </aside>
+      </div>
+    `;
+  }
+
+  async function loadListingSellerDetails(authorId) {
+    if (!authorId) return null;
+    if (state.listingSellerCache.has(authorId)) return state.listingSellerCache.get(authorId);
+    const client = await window.GimerrAuth.getClient();
+    const [profileResult, statsResult, linksResult] = await Promise.all([
+      client
+        .from("public_profiles")
+        .select("id, display_name, username, avatar_url, phone_e164, phone_contact_whatsapp, phone_contact_telegram")
+        .eq("id", authorId)
+        .maybeSingle(),
+      client
+        .from("public_profile_stats")
+        .select("profile_id, recommendations_count")
+        .eq("profile_id", authorId)
+        .maybeSingle(),
+      client
+        .from("public_profile_platform_links")
+        .select("platform, handle, profile_url")
+        .eq("profile_id", authorId),
+    ]);
+    if (profileResult.error) throw profileResult.error;
+    if (statsResult.error) throw statsResult.error;
+    if (linksResult.error) throw linksResult.error;
+    const details = {
+      profile: profileResult.data || {},
+      stats: statsResult.data || {},
+      platformLinks: linksResult.data || [],
+    };
+    state.listingSellerCache.set(authorId, details);
+    return details;
+  }
+
+  async function loadListingDetailPost(postId) {
+    const response = await fetch(`/api/posts/detail?id=${encodeURIComponent(postId)}`, {
+      headers: { accept: "application/json" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível carregar o anúncio.");
+    return payload.post || null;
+  }
+
+  function mergeListingDetailPost(fallbackPost, detailPost) {
+    if (!detailPost) return fallbackPost;
+    const index = state.feed.findIndex((item) => String(item.id) === String(detailPost.id));
+    if (index >= 0) {
+      state.feed[index] = {
+        ...state.feed[index],
+        ...detailPost,
+        author: {
+          ...(state.feed[index].author || {}),
+          ...(detailPost.author || {}),
+        },
+        game: {
+          ...(getListingGame(state.feed[index]) || {}),
+          ...(detailPost.game || {}),
+        },
+      };
+      return state.feed[index];
+    }
+    return {
+      ...fallbackPost,
+      ...detailPost,
+      author: {
+        ...(fallbackPost?.author || {}),
+        ...(detailPost.author || {}),
+      },
+      game: {
+        ...(fallbackPost ? getListingGame(fallbackPost) : {}),
+        ...(detailPost.game || {}),
+      },
+    };
+  }
+
+  async function recordListingView(postId) {
+    if (!postId || !state.session?.access_token) return;
+    try {
+      const response = await fetch("/api/posts/listing-view", {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          authorization: `Bearer ${state.session.access_token}`,
+        },
+        body: JSON.stringify({ postId }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Não foi possível registrar visualização.");
+      const listingViewCount = Number(payload.listingViewCount || 0);
+      state.feed = state.feed.map((post) => (
+        String(post.id) === String(postId)
+          ? { ...post, listingViewCount }
+          : post
+      ));
+      document.querySelectorAll("[data-listing-view-count]").forEach((element) => {
+        if (String(element.dataset.postId || "") === String(postId)) {
+          element.textContent = formatListingViewBadge(listingViewCount);
+        }
+      });
+    } catch (error) {
+      console.warn("Não foi possível registrar visualização do anúncio.", error);
+    }
+  }
+
+  function closeListingDetailModal() {
+    if (!els.listingDetailModal) return;
+    window.GimerrVideoPlayer?.stopAll?.(els.listingDetailContent);
+    els.listingDetailModal.hidden = true;
+    if (els.listingDetailContent) els.listingDetailContent.innerHTML = "";
+  }
+
+  async function openListingDetail(postId) {
+    const feedPost = state.feed.find((item) => String(item.id) === String(postId));
+    if (!els.listingDetailModal || !els.listingDetailContent) return;
+    if (feedPost && feedPost.type !== "listing") return;
+    els.listingDetailModal.hidden = false;
+    els.listingDetailContent.innerHTML = `<div class="listing-detail-loading">Carregando anúncio...</div>`;
+    try {
+      let post = feedPost;
+      if (!post) {
+        const detailPost = await loadListingDetailPost(postId);
+        if (!detailPost || detailPost.type !== "listing") throw new Error("Anúncio não encontrado.");
+        post = mergeListingDetailPost(feedPost, detailPost);
+      }
+      recordListingView(postId);
+      els.listingDetailContent.innerHTML = renderListingDetail(post, null);
+      window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
+      const sellerDetails = await loadListingSellerDetails(post.author?.id);
+      els.listingDetailContent.innerHTML = renderListingDetail(post, sellerDetails);
+      window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
+    } catch (error) {
+      console.warn("Não foi possível carregar detalhes do anúncio.", error);
+      if (feedPost?.type === "listing") {
+        recordListingView(postId);
+        els.listingDetailContent.innerHTML = renderListingDetail(feedPost, null);
+        window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
+        return;
+      }
+      els.listingDetailContent.innerHTML = `<div class="listing-detail-loading">Não foi possível carregar este anúncio.</div>`;
+    }
   }
 
   function getPostMediaItems(post) {
@@ -788,16 +1234,13 @@
   }
 
   function renderPostMedia(post) {
+    if (post.type === "listing") return renderListingMedia(post);
     const items = getPostMediaItems(post);
+    const videoItem = items.find((item) => String(item?.mediaType || "").startsWith("video/"));
+    if (videoItem?.url) return renderVideoPoster(post, videoItem);
     const imageItems = items.filter((item) => item.mediaType?.startsWith("image/"));
     const [firstImage] = imageItems;
-    if (!firstImage?.url) {
-      return `
-        <div class="listing-preview-button listing-placeholder-card">
-          <span class="listing-placeholder-title">Sem imagens</span>
-        </div>
-      `;
-    }
+    if (!firstImage?.url) return "";
     if (imageItems.length === 1) {
       return `
         <button class="media-zoom-button" type="button" data-image-src="${escapeHtml(firstImage.url)}" ${renderImageLightboxAttrs(post, "Imagem do anúncio")}>
@@ -1420,14 +1863,6 @@
       setComposerFeedback("Publicado.", "success");
     } catch (error) {
       console.warn("Não foi possível publicar no game.", error);
-      if (error.code === "account_not_verified") {
-        setComposerFeedback("Verifique sua conta no Discord para publicar.", "error");
-        return;
-      }
-      if (error.code === "video_upload_requires_discord_verification") {
-        setComposerFeedback("Verifique sua conta pelo bot do Gimerr no Discord para enviar vídeos.", "error");
-        return;
-      }
       setComposerFeedback(error.message || "Não foi possível publicar.", "error");
     } finally {
       setPublishing(false);
@@ -1511,6 +1946,44 @@
     renderFeed();
   }
 
+  async function editPostText(postId) {
+    state.editingPostId = String(postId || "");
+    closePostMenus();
+    renderFeed({ prepareVideos: false });
+    window.setTimeout(() => {
+      const textarea = document.querySelector(`[data-post-edit-form][data-post-id="${CSS.escape(String(postId || ""))}"] textarea`);
+      textarea?.focus();
+      textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
+  }
+
+  async function savePostText(postId, body) {
+    if (!state.session?.access_token) return;
+    const post = state.feed.find((item) => String(item.id) === String(postId));
+    if (!post || post.type === "listing") return;
+    state.editSubmittingPostId = String(postId || "");
+    const response = await fetch("/api/posts/update", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${state.session.access_token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ postId, body }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível editar este post.");
+
+    state.feed = state.feed.map((item) => (
+      String(item.id) === String(postId)
+        ? { ...item, body: payload.post?.body ?? String(body || "").trim() }
+        : item
+    ));
+    state.editingPostId = "";
+    state.editSubmittingPostId = "";
+    renderFeed({ prepareVideos: false });
+  }
+
   function getTaxonomyNames(items, limit = 4) {
     return Array.isArray(items)
       ? items.slice(0, limit).map((item) => item?.abbreviation || item?.name).filter(Boolean)
@@ -1520,6 +1993,7 @@
   function setLoading(message) {
     els.title.textContent = message;
     els.description.textContent = "";
+    els.feedList.classList.remove("is-marketplace-grid", "is-empty");
     els.feedList.innerHTML = "";
   }
 
@@ -1529,6 +2003,8 @@
     els.title.textContent = "Jogo não encontrado";
     els.description.textContent = message;
     els.followButton.hidden = true;
+    els.feedList.classList.remove("is-marketplace-grid");
+    els.feedList.classList.add("is-empty");
     els.feedList.innerHTML = `<div class="post-card empty-state">${escapeHtml(message)}</div>`;
     els.followersList.innerHTML = `<div class="empty-state">Nenhum seguidor por aqui.</div>`;
   }
@@ -1549,7 +2025,10 @@
       ${platforms.map((platform) => `<span class="info-pill">${escapeHtml(platform)}</span>`).join("")}
     `;
 
-    els.feedSubtitle.textContent = `Anúncios publicados em ${game.name}.`;
+    els.feedSubtitle.textContent = `Publicações e anúncios publicados em ${game.name}.`;
+    if (els.marketplaceSearchLabel) {
+      els.marketplaceSearchLabel.textContent = `Buscar no Marketplace do ${game.name}`;
+    }
     renderFollowState();
     renderFollowers();
     renderFeed();
@@ -1611,48 +2090,90 @@
 
   function renderFeed({ prepareVideos = true } = {}) {
     if (state.loading) return;
-    const filtered = state.feed.filter((item) => item.type === "listing");
+    const posts = state.feed.filter((item) => item.type !== "listing");
     const listings = state.feed.filter((item) => item.type === "listing");
-    els.postsCount.textContent = formatCount(listings.length);
+    const marketplaceQuery = state.marketplaceSearch.trim().toLowerCase();
+    const searchedListings = !marketplaceQuery
+      ? listings
+      : listings.filter((post) => {
+        const listingData = getListingCardData(post);
+        return [
+          post.body,
+          state.game?.name,
+          post.author?.displayName,
+          post.author?.username,
+          ...(listingData.items || []).flatMap((item) => [item.name, item.priceLabel]),
+        ].join(" ").toLowerCase().includes(marketplaceQuery);
+      });
+    const filtered = state.filter === "listing" ? searchedListings : posts;
+    const isListingFilter = state.filter === "listing";
+    if (els.marketplaceSearchWrap) {
+      els.marketplaceSearchWrap.hidden = !isListingFilter;
+    }
+    els.postsCount.textContent = formatCount(posts.length);
     els.listingsCount.textContent = formatCount(listings.length);
+    els.feedList.classList.toggle("is-marketplace-grid", isListingFilter && filtered.length > 0);
+    els.feedList.classList.toggle("is-empty", !filtered.length);
 
     if (!filtered.length) {
-      els.feedList.innerHTML = `<div class="post-card empty-state">Nenhum anúncio publicado para este jogo.</div>`;
+      els.feedList.innerHTML = `<div class="post-card empty-state">${isListingFilter ? "Nenhum anúncio publicado para este jogo." : "Nenhum post publicado para este jogo."}</div>`;
       return;
     }
 
     els.feedList.innerHTML = filtered.map((post) => {
-      const author = post.author || {};
-      const authorName = author.displayName || post.author || "Usuário Gimerr";
-      const authorHandle = author.username ? `@${author.username}` : "";
+      if (post.type !== "listing") {
+        const author = post.author || {};
+        const authorName = author.displayName || author.username || "Usuário Gimerr";
+        const authorHandle = author.username ? `@${author.username}` : "";
+        const media = renderPostMedia(post);
+        return `
+          <article class="post-card">
+            ${media}
+            <div class="post-body">
+              ${renderMentionLine(authorName, post)}
+              <div class="post-meta">
+                <a class="author-block" href="${getProfileUrl(author)}">
+                  <div class="post-avatar">
+                    <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
+                  </div>
+                  <div class="author-copy">
+                    <strong>${escapeHtml(authorName)}</strong>
+                    <span>${escapeHtml(authorHandle)}</span>
+                  </div>
+                </a>
+                <div class="post-card-tools">
+                  ${renderPostMenu(post)}
+                </div>
+              </div>
+              <div>
+                ${renderPostTextBlock(post, post.body ? renderTextWithMentions(post.body, author.username) : "")}
+              </div>
+              <a class="channel-line" href="${getCurrentGameUrl()}">
+                <span class="channel-game-logo" aria-hidden="true">
+                  <img src="${escapeHtml(state.game?.coverUrl || "./assets/avatar.svg")}" alt="">
+                </span>
+                <span>Em ${escapeHtml(state.game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
+              </a>
+              ${renderPostActions(post)}
+            </div>
+          </article>
+        `;
+      }
+      const listingData = getListingCardData(post);
+      const bodyText = getListingCardPreviewText(listingData);
       const media = renderPostMedia(post);
       return `
-      <article class="post-card">
+      <article class="post-card marketplace-post-card">
         ${media}
         <div class="post-body">
-          ${renderMentionLine(authorName, post)}
-          <div class="post-meta">
-            <a class="author-block" href="${getProfileUrl(author)}">
-              <div class="post-avatar">
-                <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
-              </div>
-              <div class="author-copy">
-                <strong>${escapeHtml(authorName)}</strong>
-                <span>${escapeHtml(authorHandle)}</span>
-              </div>
-            </a>
-            <div class="post-card-tools">
-              ${renderPostMenu(post)}
-            </div>
-          </div>
           <div>
-            ${getListingPreviewText(post.body || post.text) ? `<p class="post-text">${escapeHtml(getListingPreviewText(post.body || post.text))}</p>` : ""}
+            ${bodyText ? `<p class="post-text">${escapeHtml(bodyText)}</p>` : ""}
           </div>
           <a class="channel-line" href="${getCurrentGameUrl()}">
             <span class="channel-game-logo" aria-hidden="true">
               <img src="${escapeHtml(state.game?.coverUrl || "./assets/avatar.svg")}" alt="">
             </span>
-            <span>Em ${escapeHtml(state.game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt || post.time))}</span>
+            <span>Em ${escapeHtml(state.game?.name || "Game")}</span>
           </a>
           ${renderPostActions(post)}
         </div>
@@ -1690,8 +2211,8 @@
     state.followerCount = Number(payload.followerCount || 0);
     state.following = Boolean(payload.isFollowing);
     state.feed = payload.feed || [];
-    await loadFollowedProfiles().catch((error) => {
-      console.warn("Não foi possível carregar perfis seguidos para marcações.", error);
+    await loadRecommendedProfiles().catch((error) => {
+      console.warn("Não foi possível carregar perfis recomendados para marcações.", error);
       state.followedProfiles = [];
     });
     state.loading = false;
@@ -1699,24 +2220,24 @@
     renderGame();
   }
 
-  async function loadFollowedProfiles() {
+  async function loadRecommendedProfiles() {
     if (!state.session?.user || !window.GimerrAuth) {
       state.followedProfiles = [];
       return;
     }
 
     const client = await window.GimerrAuth.getClient();
-    const { data: follows, error: followsError } = await client
-      .from("user_follows")
-      .select("following_id")
-      .eq("follower_id", state.session.user.id)
+    const { data: recommendations, error: recommendationsError } = await client
+      .from("profile_recommendations")
+      .select("recommended_id")
+      .eq("recommender_id", state.session.user.id)
       .order("created_at", { ascending: false })
       .limit(80);
 
-    if (followsError) throw followsError;
+    if (recommendationsError) throw recommendationsError;
 
-    const followedIds = [...new Set((follows || [])
-      .map((row) => row.following_id)
+    const followedIds = [...new Set((recommendations || [])
+      .map((row) => row.recommended_id)
       .filter(Boolean))];
 
     if (!followedIds.length) {
@@ -1778,6 +2299,10 @@
   els.followersPanelClose?.addEventListener("click", () => setFollowersPanelOpen(false));
   els.postsButton?.addEventListener("click", () => setFeedFilter("all", { scroll: true }));
   els.listingsButton?.addEventListener("click", () => setFeedFilter("listing", { scroll: true }));
+  els.marketplaceSearch?.addEventListener("input", (event) => {
+    state.marketplaceSearch = event.target.value;
+    renderFeed();
+  });
   els.publishPost?.addEventListener("click", publishGamePost);
   els.composerFile?.addEventListener("change", () => {
     renderComposerFile().catch((error) => {
@@ -1860,6 +2385,9 @@
     showListingHelperMessage();
     clearComposerFieldInvalidState(target);
   });
+  els.listingDetailModal?.addEventListener("click", (event) => {
+    if (event.target === els.listingDetailModal) closeListingDetailModal();
+  });
   setComposerMode("listing");
   els.filterButtons.forEach((button) => {
     button.addEventListener("click", () => setFeedFilter(button.dataset.gameFeedFilter));
@@ -1900,6 +2428,14 @@
       return;
     }
 
+    const closeListingButton = target.closest("[data-listing-close]");
+    if (closeListingButton) {
+      event.preventDefault();
+      closePostMenus();
+      closeListingDetailModal();
+      return;
+    }
+
     const shareButton = target.closest("[data-post-share]");
     if (shareButton) {
       event.preventDefault();
@@ -1911,6 +2447,36 @@
         console.warn("Não foi possível compartilhar post.", error);
         window.alert("Não foi possível compartilhar este post.");
       }
+      return;
+    }
+
+    const listingCard = target.closest("[data-listing-open]");
+    if (listingCard) {
+      event.preventDefault();
+      closePostMenus();
+      await openListingDetail(listingCard.dataset.postId || "");
+      return;
+    }
+
+    const editPostButton = target.closest("[data-post-edit]");
+    if (editPostButton) {
+      event.preventDefault();
+      closePostMenus();
+      try {
+        await editPostText(editPostButton.dataset.postId || "");
+      } catch (error) {
+        console.warn("Não foi possível editar post.", error);
+        window.alert(error.message || "Não foi possível editar este post.");
+      }
+      return;
+    }
+
+    const editPostCancelButton = target.closest("[data-post-edit-cancel]");
+    if (editPostCancelButton) {
+      event.preventDefault();
+      state.editingPostId = "";
+      state.editSubmittingPostId = "";
+      renderFeed({ prepareVideos: false });
       return;
     }
 
@@ -2006,6 +2572,21 @@
   });
 
   document.addEventListener("submit", async (event) => {
+    const editForm = event.target instanceof Element ? event.target.closest("[data-post-edit-form]") : null;
+    if (editForm) {
+      event.preventDefault();
+      const postId = editForm.dataset.postId || "";
+      const textarea = editForm.querySelector("textarea");
+      try {
+        await savePostText(postId, textarea?.value || "");
+      } catch (error) {
+        console.warn("Não foi possível editar post.", error);
+        state.editSubmittingPostId = "";
+        window.alert(error.message || "Não foi possível editar este post.");
+      }
+      return;
+    }
+
     const form = event.target instanceof Element ? event.target.closest("[data-inline-comment-form]") : null;
     if (!form) return;
     event.preventDefault();
@@ -2050,6 +2631,7 @@
       }
     }
     if (event.key === "Escape") {
+      if (!els.listingDetailModal?.hidden) closeListingDetailModal();
       closePostMenus();
       closeCommentMentionSuggestions();
       setFollowersPanelOpen(false);

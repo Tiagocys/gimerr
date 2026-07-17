@@ -4,6 +4,7 @@
     profiles: null,
     loadingProfiles: false,
     post: null,
+    sharedRecipients: new Set(),
   };
 
   function escapeHtml(value) {
@@ -90,20 +91,20 @@
     state.loadingProfiles = true;
     try {
       const client = await window.GimerrAuth.getClient();
-      const { data: follows, error: followsError } = await client
-        .from("user_follows")
-        .select("following_id")
-        .eq("follower_id", session.user.id)
+      const { data: recommendations, error: recommendationsError } = await client
+        .from("profile_recommendations")
+        .select("recommended_id")
+        .eq("recommender_id", session.user.id)
         .order("created_at", { ascending: false })
         .limit(30);
 
-      if (followsError) throw followsError;
+      if (recommendationsError) throw recommendationsError;
 
-      const followedIds = [...new Set((follows || [])
-        .map((row) => row.following_id)
+      const recommendedIds = [...new Set((recommendations || [])
+        .map((row) => row.recommended_id)
         .filter((id) => id && id !== session.user.id))];
 
-      if (!followedIds.length) {
+      if (!recommendedIds.length) {
         state.profiles = [];
         return state.profiles;
       }
@@ -111,12 +112,12 @@
       const { data: profiles, error: profilesError } = await client
         .from("public_profiles")
         .select("id, display_name, username, avatar_url")
-        .in("id", followedIds);
+        .in("id", recommendedIds);
 
       if (profilesError) throw profilesError;
 
       const byId = new Map((profiles || []).map((profile) => [profile.id, profile]));
-      state.profiles = followedIds
+      state.profiles = recommendedIds
         .map((id) => normalizeProfile(byId.get(id)))
         .filter(Boolean);
       return state.profiles;
@@ -136,13 +137,14 @@
         <div class="modal-head">
           <div>
             <h2 id="share-modal-title">Compartilhar post</h2>
-            <p>Envie para alguém que você segue ou copie o link.</p>
+            <p>Envie para alguém que você recomenda ou copie o link.</p>
           </div>
           <button class="ghost-icon share-modal-close" type="button" data-share-close aria-label="Fechar">×</button>
         </div>
         <div class="share-qr-card" data-share-qr-card hidden>
           <p class="share-qr-description" data-share-qr-description hidden></p>
-          <div class="share-qr-frame" data-share-qr-frame></div>
+          <div class="share-qr-loader" data-share-qr-loader hidden>Gerando QR Code...</div>
+          <div class="share-qr-frame" data-share-qr-frame hidden></div>
           <small>Escaneie para abrir este anúncio.</small>
         </div>
         <button class="share-copy-button" type="button" data-share-copy>
@@ -150,7 +152,7 @@
         </button>
         <div class="share-suggestions-head">
           <strong>Sugestões</strong>
-          <small>Usuários que você segue</small>
+          <small>Usuários que você recomenda</small>
         </div>
         <div class="share-suggestion-list" data-share-suggestions>
           <p class="share-empty">Carregando sugestões...</p>
@@ -175,9 +177,11 @@
       feedback: modal.querySelector("[data-share-feedback]"),
       title: modal.querySelector("#share-modal-title"),
       copy: modal.querySelector(".modal-head p"),
+      copyButton: modal.querySelector("[data-share-copy]"),
       qrCard: modal.querySelector("[data-share-qr-card]"),
       qrDescription: modal.querySelector("[data-share-qr-description]"),
       qrFrame: modal.querySelector("[data-share-qr-frame]"),
+      qrLoader: modal.querySelector("[data-share-qr-loader]"),
     };
   }
 
@@ -196,7 +200,7 @@
       return;
     }
     if (!profiles.length) {
-      list.innerHTML = `<p class="share-empty">Você ainda não segue usuários para compartilhar por mensagem.</p>`;
+      list.innerHTML = `<p class="share-empty">Você ainda não recomendou usuários para compartilhar por mensagem.</p>`;
       return;
     }
 
@@ -209,33 +213,54 @@
           <strong>${escapeHtml(profile.displayName)}</strong>
           ${profile.username ? `<span>@${escapeHtml(profile.username)}</span>` : ""}
         </span>
-        <small>Enviar</small>
+        <small>${state.sharedRecipients.has(profile.id) ? "Enviado" : "Enviar"}</small>
       </button>
     `).join("");
+    list.querySelectorAll("[data-share-recipient]").forEach((button) => {
+      if (state.sharedRecipients.has(button.dataset.shareRecipient)) {
+        button.disabled = true;
+        button.classList.add("is-sent");
+      }
+    });
   }
 
   function renderQrCard() {
-    const { title, copy, qrCard, qrDescription, qrFrame } = getModalEls();
+    const { title, copy, qrCard, qrDescription, qrFrame, qrLoader } = getModalEls();
     const post = state.post || {};
     const isListing = post.type === "listing";
     if (title) title.textContent = isListing ? "Compartilhar anúncio" : "Compartilhar post";
     if (copy) {
       copy.textContent = isListing
         ? "Envie por mensagem, copie o link ou mostre o QR Code."
-        : "Envie para alguém que você segue ou copie o link.";
+        : "Envie para alguém que você recomenda ou copie o link.";
     }
     if (!qrCard || !qrFrame) return;
 
     const qrMarkup = isListing ? createQrMarkup(post.url) : "";
     qrCard.hidden = !qrMarkup;
+    qrLoader.hidden = !qrMarkup;
+    qrFrame.hidden = true;
     qrFrame.innerHTML = qrMarkup
       ? `
         <div class="share-qr-code">
           ${qrMarkup}
-          <img src="./assets/logo-square.svg" alt="Gimerr">
+          <img src="./assets/logo-square.svg" alt="Gimerr" data-share-qr-logo>
         </div>
       `
       : "";
+    const logo = qrFrame.querySelector("[data-share-qr-logo]");
+    if (logo) {
+      const showQr = () => {
+        qrLoader.hidden = true;
+        qrFrame.hidden = false;
+      };
+      if (logo.complete) {
+        showQr();
+      } else {
+        logo.addEventListener("load", showQr, { once: true });
+        logo.addEventListener("error", showQr, { once: true });
+      }
+    }
 
     if (qrDescription) {
       qrDescription.textContent = post.description || "";
@@ -247,6 +272,7 @@
     if (!state.modal) return;
     state.modal.hidden = true;
     state.post = null;
+    state.sharedRecipients = new Set();
   }
 
   async function sendPostToProfile(profileId, button) {
@@ -258,7 +284,7 @@
     const post = state.post;
     if (!post?.url) return;
 
-    const originalText = button?.textContent || "";
+    if (state.sharedRecipients.has(profileId)) return;
     if (button) {
       button.disabled = true;
       button.querySelector("small").textContent = "Enviando...";
@@ -306,7 +332,8 @@
     }
 
     if (button?.querySelector("small")) button.querySelector("small").textContent = "Enviado";
-    setTimeout(closeShareModal, 850);
+    button?.classList.add("is-sent");
+    state.sharedRecipients.add(profileId);
   }
 
   async function handleModalClick(event) {
@@ -322,6 +349,13 @@
     if (copyButton) {
       await copyTextToClipboard(state.post?.url || window.location.href);
       setFeedback("Link copiado.", "is-success");
+      copyButton.classList.add("is-copied");
+      copyButton.querySelector("span").textContent = "Link copiado";
+      window.setTimeout(() => {
+        if (!state.modal || state.modal.hidden) return;
+        copyButton.classList.remove("is-copied");
+        copyButton.querySelector("span").textContent = "Copiar link";
+      }, 1600);
       return;
     }
 
@@ -346,8 +380,14 @@
     };
 
     const modal = ensureModal();
+    state.sharedRecipients = new Set();
     modal.hidden = false;
     setFeedback("");
+    const { copyButton } = getModalEls();
+    if (copyButton) {
+      copyButton.classList.remove("is-copied");
+      copyButton.querySelector("span").textContent = "Copiar link";
+    }
     renderQrCard();
     renderSuggestions([], { loading: true });
 

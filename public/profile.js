@@ -10,26 +10,30 @@ const profileInfo = {
   connectedAccounts: [],
 };
 
+const GIMERR_SYSTEM_PROFILE_ID = "00000000-0000-4000-8000-000000000001";
+const GIMERR_SYSTEM_USERNAMES = new Set(["gimerr_app", "app_gimerr"]);
+
 const state = {
   session: null,
   loading: true,
-  following: false,
   recommended: false,
-  followerCount: 0,
   recommendationCount: 0,
   postsCount: 0,
-  followers: [],
   recommendations: [],
   posts: [],
+  feedFilter: "all",
   profileMissing: false,
   activeCommentPostId: "",
   activeCommentsPostId: "",
   commentSubmittingPostId: "",
+  editingPostId: "",
+  editSubmittingPostId: "",
   replyingToCommentId: "",
   commentsLoadingPostId: "",
   commentsByPost: {},
   commentsErrorByPost: {},
   followedProfiles: [],
+  listingSellerCache: new Map(),
   commentMention: {
     active: false,
     start: -1,
@@ -46,11 +50,9 @@ const els = {
   feedList: document.querySelector("#profile-feed-list"),
   displayName: document.querySelector("#profile-display-name"),
   avatar: document.querySelector(".profile-avatar-large"),
-  followButton: document.querySelector("#follow-button"),
   recommendButton: document.querySelector("#recommend-button"),
-  followersButton: document.querySelector("#followers-button"),
+  reportProfileButton: document.querySelector("#profile-report-button"),
   recommendationsButton: document.querySelector("#recommendations-button"),
-  followersCount: document.querySelector("#followers-count"),
   recommendationsCount: document.querySelector("#recommendations-count"),
   postsCount: document.querySelector("#posts-count"),
   publicInfo: document.querySelector("#profile-public-info"),
@@ -61,6 +63,9 @@ const els = {
   peopleList: document.querySelector("#people-list"),
   editProfileLink: document.querySelector("#edit-profile-link"),
   feedSubtitle: document.querySelector("#profile-feed-subtitle"),
+  filterButtons: document.querySelectorAll("[data-profile-feed-filter]"),
+  listingDetailModal: document.querySelector("#listing-detail-modal"),
+  listingDetailContent: document.querySelector("#listing-detail-content"),
 };
 
 function redirectLegacySharedPostUrl() {
@@ -93,6 +98,31 @@ function getProfileTarget() {
   return null;
 }
 
+function isSystemProfileTarget(target) {
+  if (!target) return false;
+  if (target.type === "id") return target.value === GIMERR_SYSTEM_PROFILE_ID;
+  return GIMERR_SYSTEM_USERNAMES.has(String(target.value || "").toLowerCase());
+}
+
+function isSystemProfile(profile) {
+  const username = String(profile?.username || "").toLowerCase();
+  return profile?.id === GIMERR_SYSTEM_PROFILE_ID || GIMERR_SYSTEM_USERNAMES.has(username);
+}
+
+function renderUnavailableSystemProfile() {
+  state.profileMissing = true;
+  state.loading = false;
+  els.layout.classList.remove("is-loading");
+  els.displayName.textContent = "Perfil indisponível";
+  if (els.avatar) els.avatar.src = "./assets/logo-square-fundo-branco.svg";
+  els.publicInfo.innerHTML = `<span class="profile-handle">Este remetente é usado apenas para mensagens oficiais do Gimerr.</span>`;
+  els.feedList.innerHTML = `<div class="post-card empty-state">Nada novo por aqui.</div>`;
+  els.editProfileLink.hidden = true;
+  els.messageLink.hidden = true;
+  els.recommendButton.hidden = true;
+  els.reportProfileButton.hidden = true;
+}
+
 function getPublicProfileUrl(profile) {
   if (profile?.username) return `./profile?u=${encodeURIComponent(profile.username)}`;
   return `./profile?id=${encodeURIComponent(profile.id)}`;
@@ -101,6 +131,13 @@ function getPublicProfileUrl(profile) {
 function getProfileUrl(profile) {
   if (profile?.username) return `./profile?u=${encodeURIComponent(profile.username)}`;
   return `./profile?id=${encodeURIComponent(profile.id || profile.follower_id || profile.recommender_id)}`;
+}
+
+function getGameUrl(game) {
+  if (!game) return "./game";
+  return game.slug
+    ? `./game?slug=${encodeURIComponent(game.slug)}`
+    : `./game?id=${encodeURIComponent(game.id || game.igdbId || "")}`;
 }
 
 function normalizeFollowedProfile(profile) {
@@ -177,12 +214,12 @@ function renderVideoPoster(post, item) {
         ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
         <span class="video-lazy-play" aria-hidden="true"></span>
       </button>
-      <span class="video-view-counter" data-video-view-count data-post-id="${escapeHtml(post.id || "")}">${escapeHtml(formatVideoViewCount(post.videoViewCount))}</span>
     </div>
   `;
 }
 
 function renderPostMedia(post) {
+  if (post.type === "listing") return renderListingMedia(post);
   const items = getPostMediaItems(post);
   if (!items.length) return "";
   const [firstItem] = items;
@@ -387,36 +424,20 @@ function applyProfile(profile, links = []) {
 async function loadProfileStats(client, profileId, viewerId) {
   const [
     statsResult,
-    followersResult,
     recommendationsResult,
-    followingResult,
     recommendedResult,
   ] = await Promise.all([
     client
       .from("public_profile_stats")
-      .select("followers_count, recommendations_count, posts_count")
+      .select("recommendations_count, posts_count")
       .eq("profile_id", profileId)
       .maybeSingle(),
-    client
-      .from("public_profile_followers")
-      .select("follower_id, display_name, username, avatar_url")
-      .eq("profile_id", profileId)
-      .order("created_at", { ascending: false })
-      .limit(50),
     client
       .from("public_profile_recommenders")
       .select("recommender_id, display_name, username, avatar_url")
       .eq("profile_id", profileId)
       .order("created_at", { ascending: false })
       .limit(50),
-    viewerId && viewerId !== profileId
-      ? client
-        .from("user_follows")
-        .select("follower_id")
-        .eq("follower_id", viewerId)
-        .eq("following_id", profileId)
-        .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
     viewerId && viewerId !== profileId
       ? client
         .from("profile_recommendations")
@@ -428,16 +449,11 @@ async function loadProfileStats(client, profileId, viewerId) {
   ]);
 
   if (statsResult.error) throw statsResult.error;
-  if (followersResult.error) throw followersResult.error;
   if (recommendationsResult.error) throw recommendationsResult.error;
-  if (followingResult.error && followingResult.error.code !== "PGRST116") throw followingResult.error;
   if (recommendedResult.error && recommendedResult.error.code !== "PGRST116") throw recommendedResult.error;
 
-  state.followerCount = Number(statsResult.data?.followers_count || 0);
   state.recommendationCount = Number(statsResult.data?.recommendations_count || 0);
-  state.followers = followersResult.data || [];
   state.recommendations = recommendationsResult.data || [];
-  state.following = Boolean(followingResult.data);
   state.recommended = Boolean(recommendedResult.data);
 }
 
@@ -473,26 +489,26 @@ async function loadProfilePosts(client, profileId) {
   state.postsCount = Number(count ?? state.posts.length);
 }
 
-async function loadFollowedProfiles(client, viewerId) {
+async function loadRecommendedProfiles(client, viewerId) {
   if (!viewerId) {
     state.followedProfiles = [];
     return;
   }
 
-  const { data: follows, error: followsError } = await client
-    .from("user_follows")
-    .select("following_id")
-    .eq("follower_id", viewerId)
+  const { data: recommendations, error: recommendationsError } = await client
+    .from("profile_recommendations")
+    .select("recommended_id")
+    .eq("recommender_id", viewerId)
     .order("created_at", { ascending: false })
     .limit(80);
 
-  if (followsError) throw followsError;
+  if (recommendationsError) throw recommendationsError;
 
-  const followedIds = [...new Set((follows || [])
-    .map((row) => row.following_id)
+  const recommendedIds = [...new Set((recommendations || [])
+    .map((row) => row.recommended_id)
     .filter(Boolean))];
 
-  if (!followedIds.length) {
+  if (!recommendedIds.length) {
     state.followedProfiles = [];
     return;
   }
@@ -500,12 +516,12 @@ async function loadFollowedProfiles(client, viewerId) {
   const { data: profiles, error: profilesError } = await client
     .from("public_profiles")
     .select("id, display_name, username, avatar_url")
-    .in("id", followedIds);
+    .in("id", recommendedIds);
 
   if (profilesError) throw profilesError;
 
   const byId = new Map((profiles || []).map((profile) => [profile.id, profile]));
-  state.followedProfiles = followedIds
+  state.followedProfiles = recommendedIds
     .map((id) => normalizeFollowedProfile(byId.get(id)))
     .filter(Boolean);
 }
@@ -517,6 +533,11 @@ async function hydrateAuthenticatedProfile() {
     const user = data.session?.user;
     const target = getProfileTarget();
     state.session = data.session || null;
+
+    if (isSystemProfileTarget(target)) {
+      renderUnavailableSystemProfile();
+      return;
+    }
 
     if (!target && !user) {
       window.location.replace("./sign-in.html");
@@ -560,8 +581,13 @@ async function hydrateAuthenticatedProfile() {
       els.feedList.innerHTML = `<div class="post-card empty-state">Nada novo por aqui.</div>`;
       els.editProfileLink.hidden = true;
       els.messageLink.hidden = true;
-      els.followButton.hidden = true;
       els.recommendButton.hidden = true;
+      els.reportProfileButton.hidden = true;
+      return;
+    }
+
+    if (isSystemProfile(profileResult.data)) {
+      renderUnavailableSystemProfile();
       return;
     }
 
@@ -575,15 +601,15 @@ async function hydrateAuthenticatedProfile() {
     await Promise.all([
       loadProfileStats(client, profileResult.data.id, user?.id),
       loadProfilePosts(client, profileResult.data.id),
-      loadFollowedProfiles(client, user?.id),
+      loadRecommendedProfiles(client, user?.id),
     ]);
     applyProfile(profileResult.data, links || []);
 
     const isOwnProfile = profileResult.data.id === user?.id;
     els.editProfileLink.hidden = !isOwnProfile;
     els.messageLink.hidden = isOwnProfile;
-    els.followButton.hidden = isOwnProfile;
     els.recommendButton.hidden = isOwnProfile;
+    els.reportProfileButton.hidden = isOwnProfile;
 
     if (isOwnProfile) {
       window.history.replaceState({}, document.title, getPublicProfileUrl(profileResult.data));
@@ -599,9 +625,16 @@ async function hydrateAuthenticatedProfile() {
 
 function renderCounts() {
   if (state.loading) return;
-  els.followersCount.textContent = String(state.followerCount);
   els.recommendationsCount.textContent = String(state.recommendationCount);
   els.postsCount.textContent = String(state.postsCount);
+}
+
+function setRecommendButtonLabel(label) {
+  if (!els.recommendButton) return;
+  els.recommendButton.innerHTML = `
+    <img src="./assets/rec.svg" alt="" aria-hidden="true">
+    <span>${escapeHtml(label)}</span>
+  `;
 }
 
 function renderActions() {
@@ -612,11 +645,10 @@ function renderActions() {
   els.messageLink.href = profileInfo.id
     ? `./messages?recipientId=${encodeURIComponent(profileInfo.id)}`
     : "./messages.html";
-  els.followButton.disabled = !state.session?.user || !profileInfo.id;
   els.recommendButton.disabled = !state.session?.user || !profileInfo.id;
-  els.followButton.textContent = state.following ? "Seguindo" : "Seguir";
-  els.followButton.classList.toggle("is-secondary-state", state.following);
-  els.recommendButton.textContent = state.recommended ? "Recomendado" : "Recomendar";
+  els.reportProfileButton.hidden = isOwnProfile || !profileInfo.id;
+  els.reportProfileButton.disabled = !state.session?.user || !profileInfo.id;
+  setRecommendButtonLabel(state.recommended ? "Recomendado" : "Recomendar");
   els.recommendButton.classList.toggle("is-secondary-state", state.recommended);
 }
 
@@ -680,7 +712,9 @@ function renderPublicInfo() {
 
 function renderPostMenu(post) {
   const postId = escapeHtml(post.id);
-  const isOwner = state.session?.user?.id && post.profileId === state.session.user.id;
+  const ownerId = post.author?.id || post.profileId || post.profile_id || "";
+  const isOwner = state.session?.user?.id && String(ownerId) === String(state.session.user.id);
+  const isListing = post.type === "listing";
   return `
     <div class="post-menu" data-post-menu>
       <button class="ghost-icon post-menu-button" type="button" data-post-menu-toggle data-post-id="${postId}" aria-label="Abrir menu do post" aria-expanded="false">
@@ -688,7 +722,9 @@ function renderPostMenu(post) {
       </button>
       <div class="post-menu-popover" hidden>
         ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
-        ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Apagar post</button>` : ""}
+        ${isOwner && isListing ? `<a href="./?editListing=${encodeURIComponent(post.id)}">Editar</a>` : ""}
+        ${isOwner && !isListing ? `<button type="button" data-post-edit data-post-id="${postId}">Editar</button>` : ""}
+        ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Excluir</button>` : ""}
       </div>
     </div>
   `;
@@ -742,6 +778,8 @@ async function sharePost(postId) {
   const post = state.posts.find((item) => String(item.id) === String(postId));
   const title = post?.type === "video"
     ? `Veja este vídeo no Gimerr`
+    : post?.type === "listing"
+      ? `Veja este anúncio no Gimerr`
     : `Veja este post no Gimerr`;
 
   if (window.GimerrShare?.openPostShare) {
@@ -772,14 +810,148 @@ function formatVideoViewCount(value) {
   return count === 1 ? "1 visualização" : `${formatted} visualizações`;
 }
 
+function hasVideoMedia(post) {
+  return getPostMediaItems(post).some((item) => String(item?.mediaType || "").startsWith("video/"));
+}
+
+function renderProfilePostTools(post) {
+  if (post.type === "listing") return "";
+  const label = hasVideoMedia(post)
+    ? `<span class="video-view-counter is-inline" data-video-view-count data-post-id="${escapeHtml(post.id || "")}">${escapeHtml(formatVideoViewCount(post.videoViewCount))}</span>`
+    : `<span class="profile-post-time">Publicação</span>`;
+  return `
+    <div class="profile-post-tools-row">
+      ${label}
+      ${renderPostMenu(post)}
+    </div>
+  `;
+}
+
+function renderPostTextBlock(post, textHtml) {
+  if (post.type === "listing") {
+    return textHtml ? `<p class="post-text">${textHtml}</p>` : "";
+  }
+  const postId = String(post?.id || "");
+  const isEditing = state.editingPostId === postId;
+  const isSubmitting = state.editSubmittingPostId === postId;
+  if (!isEditing) return textHtml ? `<p class="post-text">${textHtml}</p>` : "";
+  return `
+    <form class="post-edit-form" data-post-edit-form data-post-id="${escapeHtml(postId)}">
+      <textarea class="post-edit-textarea" name="body" maxlength="1200" rows="4">${escapeHtml(post.body || "")}</textarea>
+      <div class="post-edit-actions">
+        <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>${isSubmitting ? "Salvando..." : "Salvar"}</button>
+        <button class="text-button" type="button" data-post-edit-cancel data-post-id="${escapeHtml(postId)}" ${isSubmitting ? "disabled" : ""}>Cancelar</button>
+      </div>
+    </form>
+  `;
+}
+
+function formatListingItemCount(count) {
+  const value = Number(count || 0);
+  if (value === 1) return "1 item";
+  return `${new Intl.NumberFormat("pt-BR").format(value)} itens`;
+}
+
+function formatListingViewCount(value) {
+  const count = Number(value || 0);
+  if (count >= 1000) return `${new Intl.NumberFormat("pt-BR").format(Math.floor(count / 1000))}k`;
+  return new Intl.NumberFormat("pt-BR").format(count);
+}
+
+function formatListingViewBadge(value) {
+  const count = Number(value || 0);
+  return `${formatListingViewCount(count)} ${count === 1 ? "visualização" : "visualizações"}`;
+}
+
+function formatListingRelativeTime(value) {
+  const formatted = formatRelativeTime(value);
+  return formatted === "agora" ? "Agora" : formatted;
+}
+
+function parseListingBody(body, mediaItems = []) {
+  const text = String(body || "");
+  const marker = "\n\nItens:\n";
+  const markerIndex = text.indexOf(marker);
+  const description = markerIndex >= 0 ? text.slice(0, markerIndex) : "";
+  const itemsText = markerIndex >= 0 ? text.slice(markerIndex + marker.length) : text.replace(/^Itens:\n/i, "");
+  const lines = itemsText.split("\n").map((line) => line.trim()).filter(Boolean);
+  const imageItems = mediaItems.filter((item) => String(item?.mediaType || "").startsWith("image/"));
+  const mediaByPosition = new Map(imageItems
+    .filter((item) => Number.isInteger(Number(item?.position)))
+    .map((item) => [Number(item.position), item]));
+  const mediaByName = new Map(imageItems
+    .filter((item) => item?.itemName)
+    .map((item) => [String(item.itemName).toLowerCase(), item]));
+  const items = lines.map((line, index) => {
+    const [namePart, ...priceParts] = line.split(/\s+-\s+/);
+    const mediaItem = mediaByPosition.get(index) || mediaByName.get(String(namePart || "").toLowerCase()) || null;
+    return {
+      name: namePart || mediaItem?.itemName || "",
+      priceLabel: priceParts.join(" - ") || mediaItem?.priceLabel || "",
+      previewUrl: mediaItem?.url || "",
+      mediaItem,
+    };
+  });
+  return { description, items };
+}
+
+function getListingCardData(post) {
+  const mediaItems = Array.isArray(post?.mediaItems) ? post.mediaItems : getPostMediaItems(post);
+  const parsed = parseListingBody(post?.body || "", mediaItems);
+  return {
+    ...parsed,
+    itemCount: parsed.items.filter((item) => item.name || item.priceLabel || item.previewUrl || item.mediaItem).length,
+  };
+}
+
+function getListingPreviewText(listingData) {
+  const text = listingData?.description || listingData?.items?.find((item) => item.name)?.name || "";
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  return clean.length > 58 ? `${clean.slice(0, 58).trim()}...` : clean;
+}
+
+function renderListingMedia(post) {
+  const items = getPostMediaItems(post);
+  const firstImage = items.find((item) => String(item?.mediaType || "").startsWith("image/"));
+  const itemCount = getListingCardData(post).itemCount;
+  const countLabel = formatListingItemCount(itemCount);
+  const postId = escapeHtml(post.id || "");
+  const openAttrs = `type="button" data-listing-open data-post-id="${postId}" aria-label="Ver anúncio"`;
+  const overlays = `
+    <span class="listing-preview-views" data-listing-view-count data-post-id="${postId}">${escapeHtml(formatListingViewBadge(post.listingViewCount))}</span>
+    <button class="listing-preview-share" type="button" data-post-share data-post-id="${postId}" aria-label="Compartilhar anúncio">
+      <img src="./assets/share-2.svg" alt="" aria-hidden="true">
+    </button>
+  `;
+  if (!firstImage?.url) {
+    return `
+      <div class="listing-preview-frame">
+        <button class="listing-preview-button listing-placeholder-card" ${openAttrs}>
+          <span class="listing-placeholder-title">Sem imagens</span>
+          <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
+        </button>
+        ${overlays}
+      </div>
+    `;
+  }
+  return `
+    <div class="listing-preview-frame">
+      <button class="listing-preview-button" ${openAttrs}>
+        <img src="${escapeHtml(firstImage.url)}" alt="">
+        <span class="listing-preview-count">${escapeHtml(countLabel)}</span>
+      </button>
+      ${overlays}
+    </div>
+  `;
+}
+
 function renderPostActions(post) {
   const postId = escapeHtml(post.id);
   if (post.type === "listing") {
     return `
-      <div class="post-action-bar post-action-bar--listing">
-        <button class="post-action-button" type="button" data-post-share data-post-id="${postId}">
-          Compartilhar
-        </button>
+      <div class="post-action-bar post-action-bar--listing listing-card-meta">
+        <span>${escapeHtml(formatListingRelativeTime(post.createdAt))}</span>
+        ${renderPostMenu(post)}
       </div>
     `;
   }
@@ -800,6 +972,334 @@ function renderPostActions(post) {
     ${renderInlineCommentsPanel(post)}
     ${renderInlineCommentForm(post)}
   `;
+}
+
+function formatCountLabel(value, singular, plural) {
+  const count = Number(value || 0);
+  const formatted = new Intl.NumberFormat("pt-BR").format(count);
+  return count === 1 ? `1 ${singular}` : `${formatted} ${plural}`;
+}
+
+function getWhatsappUrl(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  return digits ? `https://wa.me/${digits}` : "";
+}
+
+function getPhoneLabel(phone) {
+  return String(phone || "").replace(/^\+/, "+");
+}
+
+function getPlatformMeta(platform) {
+  const id = String(platform || "").trim().toLowerCase();
+  if (id === "discord") return { id, label: "Discord", icon: "./assets/discord.svg" };
+  if (id === "twitch") return { id, label: "Twitch", icon: "./assets/twitch.svg" };
+  return { id: id || "platform", label: platform || "Plataforma", icon: "" };
+}
+
+function renderSellerContacts(details) {
+  const profile = details?.profile || {};
+  const links = Array.isArray(details?.platformLinks) ? details.platformLinks : [];
+  const contactItems = [];
+  if (profile.phone_e164) {
+    contactItems.push(`<a href="tel:${escapeHtml(profile.phone_e164)}">Telefone: ${escapeHtml(getPhoneLabel(profile.phone_e164))}</a>`);
+    if (profile.phone_contact_whatsapp) {
+      const whatsappUrl = getWhatsappUrl(profile.phone_e164);
+      if (whatsappUrl) {
+        contactItems.push(`
+          <a class="info-pill contact-pill whatsapp-contact-pill" href="${escapeHtml(whatsappUrl)}" target="_blank" rel="noopener">
+            <img src="./assets/whatsapp.svg" alt="">
+            WhatsApp
+          </a>
+        `);
+      }
+    }
+    if (profile.phone_contact_telegram) {
+      const phoneDigits = String(profile.phone_e164 || "").replace(/\D/g, "");
+      if (phoneDigits) {
+        contactItems.push(`
+          <a class="info-pill contact-pill telegram-contact-button" href="tg://resolve?phone=${escapeHtml(phoneDigits)}">
+            <img src="./assets/telegram.svg" alt="">
+            Telegram
+          </a>
+        `);
+      }
+    }
+  }
+  links.forEach((link) => {
+    const platformMeta = getPlatformMeta(link.platform);
+    const handle = link.handle || platformMeta.label;
+    const label = `${platformMeta.label}${link.handle ? `: ${link.handle}` : ""}`;
+    if (link.profile_url) {
+      contactItems.push(`
+        <a class="info-pill platform-pill platform-pill-${escapeHtml(platformMeta.id)}" href="${escapeHtml(link.profile_url)}" target="_blank" rel="noopener" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+          ${platformMeta.icon ? `<img src="${escapeHtml(platformMeta.icon)}" alt="">` : ""}
+          <span>${escapeHtml(handle)}</span>
+        </a>
+      `);
+    } else {
+      contactItems.push(`
+        <span class="info-pill platform-pill platform-pill-${escapeHtml(platformMeta.id)}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">
+          ${platformMeta.icon ? `<img src="${escapeHtml(platformMeta.icon)}" alt="">` : ""}
+          <span>${escapeHtml(handle)}</span>
+        </span>
+      `);
+    }
+  });
+  return contactItems.length
+    ? contactItems.map((item) => `<li>${item}</li>`).join("")
+    : `<li><span>Sem contatos públicos.</span></li>`;
+}
+
+function getListingGame(post) {
+  return post?.game || {
+    id: post?.gameId || "",
+    slug: post?.gameSlug || "",
+    name: post?.gameName || "Game",
+    coverUrl: post?.gameCoverUrl || "./assets/avatar.svg",
+  };
+}
+
+function getListingAuthor(post) {
+  return {
+    id: profileInfo.id,
+    displayName: profileInfo.displayName,
+    username: profileInfo.username,
+    avatarUrl: profileInfo.avatarUrl || "./assets/avatar.svg",
+    ...(post?.author || {}),
+  };
+}
+
+function renderListingDetail(post, sellerDetails = null) {
+  const listingData = getListingCardData(post);
+  const game = getListingGame(post);
+  const author = getListingAuthor(post);
+  const sellerProfile = sellerDetails?.profile || {};
+  const stats = sellerDetails?.stats || {};
+  const sellerName = sellerProfile.display_name || author.displayName || author.username || "Vendedor Gimerr";
+  const sellerUsername = sellerProfile.username || author.username || "";
+  const sellerAvatar = sellerProfile.avatar_url || author.avatarUrl || "./assets/avatar.svg";
+  const canMessageSeller = author.id && author.id !== state.session?.user?.id;
+  const mediaItems = getPostMediaItems(post);
+  const listingVideo = mediaItems.find((item) => String(item?.mediaType || "").startsWith("video/"));
+  const items = listingData.items.filter((item) => item.name || item.price || item.priceLabel || item.mediaItem || item.previewUrl);
+  const galleryItems = items
+    .filter((item) => item.previewUrl)
+    .map((item, index) => ({
+      url: item.previewUrl,
+      alt: item.name ? `Imagem do item ${item.name}` : `Imagem do item ${index + 1}`,
+    }));
+  const itemList = items.map((item) => {
+    const galleryIndex = item.previewUrl
+      ? galleryItems.findIndex((galleryItem) => galleryItem.url === item.previewUrl)
+      : -1;
+    const imageAlt = item.name ? `Imagem do item ${item.name}` : "Imagem do item";
+    return `
+      <article class="listing-detail-item">
+        ${item.previewUrl ? `
+          <button class="listing-detail-item-media" type="button" data-image-src="${escapeHtml(item.previewUrl)}" data-image-index="${Math.max(0, galleryIndex)}" data-image-items="${escapeHtml(JSON.stringify(galleryItems))}" ${renderImageLightboxAttrs(post, imageAlt)} aria-label="Ampliar imagem do item">
+            <img src="${escapeHtml(item.previewUrl)}" alt="">
+          </button>
+        ` : `
+          <div class="listing-detail-item-media">
+            <span>Sem imagem</span>
+          </div>
+        `}
+        <div>
+          <strong>${escapeHtml(item.name || "Item")}</strong>
+          ${item.priceLabel ? `<span>${escapeHtml(item.priceLabel)}</span>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  return `
+    <div class="listing-detail-grid">
+      <div class="listing-detail-actions">
+        <button class="ghost-icon listing-detail-close" type="button" data-listing-close aria-label="Voltar">x</button>
+        <button class="post-action-button" type="button" data-post-share data-post-id="${escapeHtml(post.id)}">Compartilhar</button>
+        ${renderPostMenu(post)}
+      </div>
+      <section class="listing-detail-main">
+        <div>
+          <a class="channel-line" href="${getGameUrl(game)}">
+            <span class="channel-game-logo" aria-hidden="true">
+              <img src="${escapeHtml(game?.coverUrl || "./assets/avatar.svg")}" alt="">
+            </span>
+            <span>Em ${escapeHtml(game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
+          </a>
+          <h2 id="listing-detail-title">${escapeHtml(formatListingItemCount(listingData.itemCount))}</h2>
+          ${listingData.description ? `<p class="listing-detail-description">${escapeHtml(listingData.description)}</p>` : ""}
+        </div>
+        ${listingVideo ? renderVideoPoster(post, listingVideo) : ""}
+        <div class="listing-detail-items">
+          ${itemList || `<p class="empty-state">Nenhum item informado.</p>`}
+        </div>
+      </section>
+      <aside class="listing-detail-seller">
+        <a class="listing-seller-head" href="${getProfileUrl({ id: author.id, username: sellerUsername })}">
+          <img src="${escapeHtml(sellerAvatar)}" alt="">
+          <span>
+            <strong>${escapeHtml(sellerName)}</strong>
+            ${sellerUsername ? `<small>@${escapeHtml(sellerUsername)}</small>` : ""}
+          </span>
+        </a>
+        <div class="listing-seller-stats">
+          <span>${escapeHtml(formatCountLabel(stats.recommendations_count, "recomendação", "recomendações"))}</span>
+        </div>
+        ${canMessageSeller ? `
+          <a class="primary-button listing-message-button message-action-button" href="./messages?listingPostId=${encodeURIComponent(post.id)}">
+            <img src="./assets/message.svg" alt="" aria-hidden="true">
+            <span>Enviar mensagem</span>
+          </a>
+        ` : ""}
+        <div class="listing-seller-contact">
+          <strong>Contato</strong>
+          <ul>${renderSellerContacts(sellerDetails)}</ul>
+        </div>
+      </aside>
+    </div>
+  `;
+}
+
+async function loadListingSellerDetails(authorId) {
+  if (!authorId) return null;
+  if (state.listingSellerCache.has(authorId)) return state.listingSellerCache.get(authorId);
+  const client = await window.GimerrAuth.getClient();
+  const [profileResult, statsResult, linksResult] = await Promise.all([
+    client
+      .from("public_profiles")
+      .select("id, display_name, username, avatar_url, phone_e164, phone_contact_whatsapp, phone_contact_telegram")
+      .eq("id", authorId)
+      .maybeSingle(),
+    client
+      .from("public_profile_stats")
+      .select("profile_id, recommendations_count")
+      .eq("profile_id", authorId)
+      .maybeSingle(),
+    client
+      .from("public_profile_platform_links")
+      .select("platform, handle, profile_url")
+      .eq("profile_id", authorId),
+  ]);
+  if (profileResult.error) throw profileResult.error;
+  if (statsResult.error) throw statsResult.error;
+  if (linksResult.error) throw linksResult.error;
+  const details = {
+    profile: profileResult.data || {},
+    stats: statsResult.data || {},
+    platformLinks: linksResult.data || [],
+  };
+  state.listingSellerCache.set(authorId, details);
+  return details;
+}
+
+async function loadListingDetailPost(postId) {
+  const response = await fetch(`/api/posts/detail?id=${encodeURIComponent(postId)}`, {
+    headers: { accept: "application/json" },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Não foi possível carregar o anúncio.");
+  return payload.post || null;
+}
+
+function mergeListingDetailPost(fallbackPost, detailPost) {
+  if (!detailPost) return fallbackPost;
+  const index = state.posts.findIndex((item) => String(item.id) === String(detailPost.id));
+  if (index >= 0) {
+    state.posts[index] = {
+      ...state.posts[index],
+      ...detailPost,
+      author: {
+        ...(getListingAuthor(state.posts[index]) || {}),
+        ...(detailPost.author || {}),
+      },
+      game: {
+        ...(getListingGame(state.posts[index]) || {}),
+        ...(detailPost.game || {}),
+      },
+    };
+    return state.posts[index];
+  }
+  return {
+    ...fallbackPost,
+    ...detailPost,
+    author: {
+      ...(fallbackPost ? getListingAuthor(fallbackPost) : {}),
+      ...(detailPost.author || {}),
+    },
+    game: {
+      ...(fallbackPost ? getListingGame(fallbackPost) : {}),
+      ...(detailPost.game || {}),
+    },
+  };
+}
+
+async function recordListingView(postId) {
+  if (!postId || !state.session?.access_token) return;
+  try {
+    const response = await fetch("/api/posts/listing-view", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        authorization: `Bearer ${state.session.access_token}`,
+      },
+      body: JSON.stringify({ postId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível registrar visualização.");
+    const listingViewCount = Number(payload.listingViewCount || 0);
+    state.posts = state.posts.map((post) => (
+      String(post.id) === String(postId)
+        ? { ...post, listingViewCount }
+        : post
+    ));
+    document.querySelectorAll("[data-listing-view-count]").forEach((element) => {
+      if (String(element.dataset.postId || "") === String(postId)) {
+        element.textContent = formatListingViewBadge(listingViewCount);
+      }
+    });
+  } catch (error) {
+    console.warn("Não foi possível registrar visualização do anúncio.", error);
+  }
+}
+
+function closeListingDetailModal() {
+  if (!els.listingDetailModal) return;
+  window.GimerrVideoPlayer?.stopAll?.(els.listingDetailContent);
+  els.listingDetailModal.hidden = true;
+  if (els.listingDetailContent) els.listingDetailContent.innerHTML = "";
+}
+
+async function openListingDetail(postId) {
+  const feedPost = state.posts.find((item) => String(item.id) === String(postId));
+  if (!els.listingDetailModal || !els.listingDetailContent) return;
+  if (feedPost && feedPost.type !== "listing") return;
+  els.listingDetailModal.hidden = false;
+  els.listingDetailContent.innerHTML = `<div class="listing-detail-loading">Carregando anúncio...</div>`;
+  try {
+    let post = feedPost;
+    if (!post) {
+      const detailPost = await loadListingDetailPost(postId);
+      if (!detailPost || detailPost.type !== "listing") throw new Error("Anúncio não encontrado.");
+      post = mergeListingDetailPost(feedPost, detailPost);
+    }
+    recordListingView(postId);
+    els.listingDetailContent.innerHTML = renderListingDetail(post, null);
+    window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
+    const sellerDetails = await loadListingSellerDetails(getListingAuthor(post).id);
+    els.listingDetailContent.innerHTML = renderListingDetail(post, sellerDetails);
+    window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
+  } catch (error) {
+    console.warn("Não foi possível carregar detalhes do anúncio.", error);
+    if (feedPost?.type === "listing") {
+      recordListingView(postId);
+      els.listingDetailContent.innerHTML = renderListingDetail(feedPost, null);
+      window.GimerrVideoPlayer?.prepare?.(els.listingDetailContent);
+      return;
+    }
+    els.listingDetailContent.innerHTML = `<div class="listing-detail-loading">Não foi possível carregar este anúncio.</div>`;
+  }
 }
 
 function groupCommentsByParent(comments) {
@@ -1101,21 +1601,23 @@ async function reportPost(postId) {
     return;
   }
 
-  const reason = window.prompt("Informe o motivo da denúncia. Você pode deixar em branco.");
-  if (reason === null) return;
-
-  const response = await fetch("/api/posts/report", {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      authorization: `Bearer ${state.session.access_token}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ postId, reason }),
+  window.GimerrReport?.open({
+    postId,
+    token: state.session.access_token,
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Não foi possível denunciar este post.");
-  window.alert("Denúncia enviada.");
+}
+
+async function reportProfile() {
+  if (!state.session?.access_token) {
+    window.location.assign("./sign-in.html");
+    return;
+  }
+
+  window.GimerrReport?.open({
+    type: "profile",
+    profileId: profileInfo.id,
+    token: state.session.access_token,
+  });
 }
 
 async function deletePost(postId) {
@@ -1141,57 +1643,99 @@ async function deletePost(postId) {
   renderFeed();
 }
 
+async function editPostText(postId) {
+  state.editingPostId = String(postId || "");
+  closePostMenus();
+  renderFeed({ prepareVideos: false });
+  window.setTimeout(() => {
+    const textarea = document.querySelector(`[data-post-edit-form][data-post-id="${CSS.escape(String(postId || ""))}"] textarea`);
+    textarea?.focus();
+    textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
+  });
+}
+
+async function savePostText(postId, body) {
+  if (!state.session?.access_token) return;
+  const post = state.posts.find((item) => String(item.id) === String(postId));
+  if (!post || post.type === "listing") return;
+  state.editSubmittingPostId = String(postId || "");
+  const response = await fetch("/api/posts/update", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${state.session.access_token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ postId, body }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Não foi possível editar este post.");
+
+  state.posts = state.posts.map((item) => (
+    String(item.id) === String(postId)
+      ? { ...item, body: payload.post?.body ?? String(body || "").trim() }
+      : item
+  ));
+  state.editingPostId = "";
+  state.editSubmittingPostId = "";
+  renderFeed({ prepareVideos: false });
+}
+
 function renderFeed({ prepareVideos = true } = {}) {
   if (state.loading) return;
   if (state.profileMissing) return;
+  window.GimerrVideoPlayer?.stopAll?.(els.feedList);
   const query = els.search.value.trim().toLowerCase();
-  const filtered = state.posts.filter((post) => !query || [
-    post.body,
-    post.type,
-    post.gameName,
-  ].join(" ").toLowerCase().includes(query));
+  const posts = state.posts.filter((post) => post.type !== "listing");
+  const listings = state.posts.filter((post) => post.type === "listing");
+  const baseItems = state.feedFilter === "listing" ? listings : posts;
+  const filtered = baseItems.filter((post) => {
+    if (!query) return true;
+    const listingData = post.type === "listing" ? getListingCardData(post) : null;
+    return [
+      post.body,
+      post.type,
+      post.gameName,
+      ...(listingData?.items || []).flatMap((item) => [item.name, item.priceLabel]),
+    ].join(" ").toLowerCase().includes(query);
+  });
+  const isMarketplaceGrid = state.feedFilter === "listing";
+  els.feedList.classList.toggle("is-marketplace-grid", isMarketplaceGrid);
+  els.feedList.classList.toggle("is-empty", !filtered.length);
+  if (els.feedSubtitle) {
+    els.feedSubtitle.textContent = state.feedFilter === "listing"
+      ? "Anúncios publicados por este usuário."
+      : "Publicações deste usuário.";
+  }
 
   if (!filtered.length) {
-    els.feedList.innerHTML = `<div class="post-card empty-state">Nada novo por aqui.</div>`;
+    els.feedList.innerHTML = `<div class="post-card empty-state">${state.feedFilter === "listing" ? "Nenhum anúncio publicado por aqui." : "Nenhum post publicado por aqui."}</div>`;
     return;
   }
 
   els.feedList.innerHTML = filtered.map((post) => {
+    const isListing = post.type === "listing";
+    const listingData = isListing ? getListingCardData(post) : null;
+    const bodyText = isListing ? getListingPreviewText(listingData) : post.body;
     const media = renderPostMedia(post);
     const gameUrl = post.gameSlug
       ? `./game?slug=${encodeURIComponent(post.gameSlug)}`
       : `./game?id=${encodeURIComponent(post.gameId)}`;
-    const profileUrl = getProfileUrl(profileInfo);
     const authorName = profileInfo.displayName || profileInfo.username || "Usuário Gimerr";
-    const authorHandle = profileInfo.username ? `@${profileInfo.username}` : "";
     return `
-      <article class="post-card">
+      <article class="post-card${isListing ? " marketplace-post-card" : ""}">
         ${media}
+        ${renderProfilePostTools(post)}
         <div class="post-body">
-          ${post.type === "listing" ? `<span class="post-marketplace-badge">Anúncio</span>` : ""}
-          ${renderMentionLine(authorName, profileInfo.username, post)}
-          <div class="post-meta">
-            <a class="author-block" href="${profileUrl}">
-              <div class="post-avatar">
-                ${profileInfo.avatarUrl ? `<img src="${escapeHtml(profileInfo.avatarUrl)}" alt="">` : `<img src="./assets/avatar.svg" alt="">`}
-              </div>
-              <div class="author-copy">
-                <strong>${escapeHtml(authorName)}</strong>
-                <span>${escapeHtml(authorHandle)}</span>
-              </div>
-            </a>
-            <div class="post-card-tools">
-              ${renderPostMenu(post)}
-            </div>
-          </div>
+          ${isListing ? "" : renderMentionLine(authorName, profileInfo.username, post)}
           <div>
-            ${post.body ? `<p class="post-text">${escapeHtml(post.body)}</p>` : ""}
+            ${renderPostTextBlock(post, bodyText ? escapeHtml(bodyText) : "")}
           </div>
           <a class="channel-line" href="${gameUrl}">
             <span class="channel-game-logo" aria-hidden="true">
               <img src="${escapeHtml(post.gameCoverUrl || "./assets/avatar.svg")}" alt="">
             </span>
-            <span>Em ${escapeHtml(post.gameName || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
+            <span>Em ${escapeHtml(post.gameName || "Game")}${isListing ? "" : ` ${escapeHtml(formatRelativeTime(post.createdAt))}`}</span>
           </a>
           ${renderPostActions(post)}
         </div>
@@ -1199,6 +1743,14 @@ function renderFeed({ prepareVideos = true } = {}) {
     `;
   }).join("");
   if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
+}
+
+function setProfileFeedFilter(filter) {
+  state.feedFilter = filter === "listing" ? "listing" : "all";
+  els.filterButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.profileFeedFilter === state.feedFilter);
+  });
+  renderFeed();
 }
 
 function renderPersonAvatar(user) {
@@ -1231,44 +1783,6 @@ function closePeopleModal() {
   els.peopleModal.hidden = true;
 }
 
-async function toggleFollow() {
-  if (!state.session?.user || !profileInfo.id) {
-    window.location.assign("./sign-in.html");
-    return;
-  }
-
-  const client = await window.GimerrAuth.getClient();
-  const nextFollowing = !state.following;
-  els.followButton.disabled = true;
-  els.followButton.textContent = nextFollowing ? "Seguindo..." : "Removendo...";
-
-  try {
-    if (nextFollowing) {
-      const { error } = await client
-        .from("user_follows")
-        .upsert({
-          follower_id: state.session.user.id,
-          following_id: profileInfo.id,
-        }, { onConflict: "follower_id,following_id", ignoreDuplicates: true });
-      if (error) throw error;
-    } else {
-      const { error } = await client
-        .from("user_follows")
-        .delete()
-        .eq("follower_id", state.session.user.id)
-        .eq("following_id", profileInfo.id);
-      if (error) throw error;
-    }
-
-    await loadProfileStats(client, profileInfo.id, state.session.user.id);
-    renderCounts();
-    renderActions();
-  } catch (error) {
-    console.warn("Não foi possível atualizar seguidor.", error);
-    renderActions();
-  }
-}
-
 async function toggleRecommendation() {
   if (!state.session?.user || !profileInfo.id) {
     window.location.assign("./sign-in.html");
@@ -1278,7 +1792,7 @@ async function toggleRecommendation() {
   const client = await window.GimerrAuth.getClient();
   const nextRecommended = !state.recommended;
   els.recommendButton.disabled = true;
-  els.recommendButton.textContent = nextRecommended ? "Recomendando..." : "Removendo...";
+  setRecommendButtonLabel(nextRecommended ? "Recomendando..." : "Removendo...");
 
   try {
     if (nextRecommended) {
@@ -1303,19 +1817,26 @@ async function toggleRecommendation() {
     renderActions();
   } catch (error) {
     console.warn("Não foi possível atualizar recomendação.", error);
+    window.alert(error.message || "Não foi possível atualizar recomendação.");
     renderActions();
   }
 }
 
 els.search.addEventListener("input", renderFeed);
-els.followButton.addEventListener("click", toggleFollow);
+els.filterButtons.forEach((button) => {
+  button.addEventListener("click", () => setProfileFeedFilter(button.dataset.profileFeedFilter));
+});
 els.recommendButton.addEventListener("click", toggleRecommendation);
-els.followersButton.addEventListener("click", () => openPeopleModal("Seguidores", state.followers));
+els.reportProfileButton.addEventListener("click", reportProfile);
 els.recommendationsButton.addEventListener("click", () => openPeopleModal("Recomendações", state.recommendations));
 els.peopleModalClose.addEventListener("click", closePeopleModal);
 
 els.peopleModal.addEventListener("click", (event) => {
   if (event.target === els.peopleModal) closePeopleModal();
+});
+
+els.listingDetailModal?.addEventListener("click", (event) => {
+  if (event.target === els.listingDetailModal) closeListingDetailModal();
 });
 
 document.addEventListener("click", async (event) => {
@@ -1326,6 +1847,14 @@ document.addEventListener("click", async (event) => {
   if (menuToggle) {
     event.preventDefault();
     togglePostMenu(menuToggle);
+    return;
+  }
+
+  const closeListingButton = target.closest("[data-listing-close]");
+  if (closeListingButton) {
+    event.preventDefault();
+    closePostMenus();
+    closeListingDetailModal();
     return;
   }
 
@@ -1340,6 +1869,36 @@ document.addEventListener("click", async (event) => {
       console.warn("Não foi possível compartilhar post.", error);
       window.alert("Não foi possível compartilhar este post.");
     }
+    return;
+  }
+
+  const listingCard = target.closest("[data-listing-open]");
+  if (listingCard) {
+    event.preventDefault();
+    closePostMenus();
+    await openListingDetail(listingCard.dataset.postId || "");
+    return;
+  }
+
+  const editPostButton = target.closest("[data-post-edit]");
+  if (editPostButton) {
+    event.preventDefault();
+    closePostMenus();
+    try {
+      await editPostText(editPostButton.dataset.postId || "");
+    } catch (error) {
+      console.warn("Não foi possível editar post.", error);
+      window.alert(error.message || "Não foi possível editar este post.");
+    }
+    return;
+  }
+
+  const editPostCancelButton = target.closest("[data-post-edit-cancel]");
+  if (editPostCancelButton) {
+    event.preventDefault();
+    state.editingPostId = "";
+    state.editSubmittingPostId = "";
+    renderFeed({ prepareVideos: false });
     return;
   }
 
@@ -1448,6 +2007,21 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("submit", async (event) => {
+  const editForm = event.target instanceof Element ? event.target.closest("[data-post-edit-form]") : null;
+  if (editForm) {
+    event.preventDefault();
+    const postId = editForm.dataset.postId || "";
+    const textarea = editForm.querySelector("textarea");
+    try {
+      await savePostText(postId, textarea?.value || "");
+    } catch (error) {
+      console.warn("Não foi possível editar post.", error);
+      state.editSubmittingPostId = "";
+      window.alert(error.message || "Não foi possível editar este post.");
+    }
+    return;
+  }
+
   const form = event.target instanceof Element ? event.target.closest("[data-inline-comment-form]") : null;
   if (!form) return;
   event.preventDefault();
@@ -1492,6 +2066,7 @@ document.addEventListener("keydown", (event) => {
     }
   }
   if (event.key === "Escape") {
+    if (!els.listingDetailModal?.hidden) closeListingDetailModal();
     if (!els.peopleModal.hidden) closePeopleModal();
     closePostMenus();
     closeCommentMentionSuggestions();
@@ -1512,7 +2087,6 @@ document.addEventListener("gimerr:video-view", (event) => {
 async function init() {
   if (redirectLegacySharedPostUrl()) return;
 
-  els.followButton.disabled = true;
   els.recommendButton.disabled = true;
   await hydrateAuthenticatedProfile();
   state.loading = false;

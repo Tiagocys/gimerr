@@ -55,6 +55,7 @@ const els = {
   recommendationsButton: document.querySelector("#recommendations-button"),
   recommendationsCount: document.querySelector("#recommendations-count"),
   postsCount: document.querySelector("#posts-count"),
+  postsCountLabel: document.querySelector("#posts-count-label"),
   publicInfo: document.querySelector("#profile-public-info"),
   messageLink: document.querySelector("#profile-message-link"),
   peopleModal: document.querySelector("#people-modal"),
@@ -628,6 +629,9 @@ function renderCounts() {
   if (state.loading) return;
   els.recommendationsCount.textContent = String(state.recommendationCount);
   els.postsCount.textContent = String(state.postsCount);
+  if (els.postsCountLabel) {
+    els.postsCountLabel.textContent = Number(state.postsCount || 0) === 1 ? "anúncio" : "anúncios";
+  }
 }
 
 function setRecommendButtonLabel(label) {
@@ -1686,7 +1690,7 @@ function renderFeed({ prepareVideos = true } = {}) {
   if (state.loading) return;
   if (state.profileMissing) return;
   window.GimerrVideoPlayer?.stopAll?.(els.feedList);
-  const query = els.search.value.trim().toLowerCase();
+  const query = els.search?.value?.trim().toLowerCase() || "";
   const listings = state.posts.filter((post) => post.type === "listing");
   const baseItems = listings;
   const filtered = baseItems.filter((post) => {
@@ -1828,7 +1832,7 @@ async function toggleRecommendation() {
   }
 }
 
-els.search.addEventListener("input", renderFeed);
+els.search?.addEventListener("input", renderFeed);
 els.filterButtons.forEach((button) => {
   button.addEventListener("click", () => setProfileFeedFilter(button.dataset.profileFeedFilter));
 });

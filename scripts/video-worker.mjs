@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const WORK_DIR = join(ROOT, ".video-worker");
+const DEFAULT_TARGET_OUTPUT_BYTES = 50 * 1024 * 1024;
+const AUDIO_BITRATE_KBPS = 64;
+const MAX_VIDEO_BITRATE_KBPS = 850;
+const MIN_VIDEO_BITRATE_KBPS = 180;
 
 async function loadDotEnv() {
   const envPath = join(ROOT, ".env");
@@ -157,19 +161,71 @@ async function uploadR2Object(key, source, contentType = "video/mp4") {
   return `/api/media/${key}`;
 }
 
-function runFfmpeg(input, output) {
+function runFfprobeDuration(input) {
+  return new Promise((resolve, reject) => {
+    const ffprobe = spawn("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      input,
+    ], { stdio: ["ignore", "pipe", "pipe"] });
+
+    let stdout = "";
+    let stderr = "";
+    ffprobe.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    ffprobe.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    ffprobe.on("error", reject);
+    ffprobe.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`FFprobe saiu com código ${code}: ${stderr.slice(0, 240)}`));
+        return;
+      }
+      const duration = Number.parseFloat(stdout.trim());
+      if (!Number.isFinite(duration) || duration <= 0) {
+        reject(new Error("FFprobe não conseguiu identificar a duração do vídeo."));
+        return;
+      }
+      resolve(duration);
+    });
+  });
+}
+
+function getTargetOutputBytes() {
+  const value = Number(process.env.VIDEO_WORKER_TARGET_BYTES || 0);
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_TARGET_OUTPUT_BYTES;
+}
+
+function getVideoBitrateKbps(durationSeconds) {
+  const targetBytes = getTargetOutputBytes();
+  const muxOverheadKbps = 24;
+  const totalKbps = Math.floor((targetBytes * 8) / Math.max(durationSeconds, 1) / 1000);
+  const videoKbps = totalKbps - AUDIO_BITRATE_KBPS - muxOverheadKbps;
+  return Math.min(MAX_VIDEO_BITRATE_KBPS, Math.max(MIN_VIDEO_BITRATE_KBPS, videoKbps));
+}
+
+async function runFfmpeg(input, output) {
+  const durationSeconds = await runFfprobeDuration(input);
+  const videoBitrateKbps = getVideoBitrateKbps(durationSeconds);
+  const maxrateKbps = Math.ceil(videoBitrateKbps * 1.12);
+  const bufsizeKbps = Math.ceil(maxrateKbps * 2);
+  console.log(`[video-worker] duração ${durationSeconds.toFixed(1)}s, vídeo ${videoBitrateKbps}k, alvo ${(getTargetOutputBytes() / 1024 / 1024).toFixed(0)}MB`);
+
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", [
       "-y",
       "-i", input,
       "-vf", "scale=w='min(1280,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos",
       "-c:v", "libx264",
-      "-preset", "slow",
-      "-b:v", "850k",
-      "-maxrate", "950k",
-      "-bufsize", "1900k",
+      "-preset", "veryfast",
+      "-b:v", `${videoBitrateKbps}k`,
+      "-maxrate", `${maxrateKbps}k`,
+      "-bufsize", `${bufsizeKbps}k`,
       "-c:a", "aac",
-      "-b:a", "64k",
+      "-b:a", `${AUDIO_BITRATE_KBPS}k`,
       "-pix_fmt", "yuv420p",
       "-movflags", "+faststart",
       output,

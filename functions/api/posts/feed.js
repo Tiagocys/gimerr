@@ -88,6 +88,7 @@ export async function onRequestGet({ request, env }) {
 
     const url = new URL(`${getSupabaseRestUrl(env)}/public_feed_posts`);
     url.searchParams.set("select", "*");
+    url.searchParams.set("post_type", "eq.listing");
     url.searchParams.set("order", "created_at.desc");
     url.searchParams.set("limit", String(queryLimit));
     if (ignoredProfileIds.length) {

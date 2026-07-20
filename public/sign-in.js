@@ -28,6 +28,11 @@ const providerConfig = {
   },
 };
 
+function getRequestedProvider() {
+  const provider = new URLSearchParams(window.location.search).get("provider");
+  return providerConfig[provider] ? provider : "";
+}
+
 function setLoading(button, label) {
   button.dataset.originalLabel = button.textContent;
   button.textContent = label;
@@ -70,10 +75,12 @@ async function redirectAuthenticatedUser() {
     const { data } = await window.GimerrAuth.getSession();
     if (data.session) {
       window.location.assign(window.GimerrAuth.getAuthRedirectUrl());
+      return true;
     }
   } catch (error) {
     feedback.textContent = error.message;
   }
+  return false;
 }
 
 authButtons.forEach((button) => {
@@ -82,4 +89,20 @@ authButtons.forEach((button) => {
   });
 });
 
-redirectAuthenticatedUser();
+async function initSignIn() {
+  const redirected = await redirectAuthenticatedUser();
+  if (redirected) return;
+
+  const requestedProvider = getRequestedProvider();
+  if (requestedProvider) {
+    const button = authButtons.find((item) => item.dataset.provider === requestedProvider);
+    const autoStartKey = `gimerr-oauth-autostart-${requestedProvider}`;
+    if (button && !sessionStorage.getItem(autoStartKey)) {
+      sessionStorage.setItem(autoStartKey, "1");
+      await signInWithProvider(requestedProvider, button);
+      return;
+    }
+  }
+}
+
+initSignIn();

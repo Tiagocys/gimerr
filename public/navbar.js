@@ -294,10 +294,8 @@
     state.messagesLoading = false;
     setMenuOpen(false);
     renderMessagesBadge();
-    renderNotificationsBadge();
     authLink.hidden = false;
     accountMenu.hidden = true;
-    ensureNotificationsButton().hidden = true;
     ensureMessagesLink().hidden = true;
   }
 
@@ -334,7 +332,6 @@
     state.messagesPollTimer = window.setInterval(() => {
       if (!document.hidden) {
         loadMessagesUnreadCount();
-        loadNotifications();
       }
     }, 15000);
   }
@@ -356,7 +353,6 @@
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden && !state.navbarPollingPaused) {
       loadMessagesUnreadCount();
-      loadNotifications();
     }
   });
 
@@ -375,7 +371,6 @@
 
     authLink.hidden = true;
     accountMenu.hidden = false;
-    ensureNotificationsButton().hidden = false;
     ensureMessagesLink().hidden = false;
     accountMenu.innerHTML = `
       <button class="account-avatar-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Abrir menu da conta">
@@ -384,6 +379,7 @@
       <div class="account-dropdown" role="menu">
         <a href="${profileUrl}" role="menuitem">Ver meu perfil</a>
         <a href="./messages.html" role="menuitem">Mensagens</a>
+        <a href="./discord-bot.html" role="menuitem">App do Discord</a>
         <a href="./edit-profile.html" role="menuitem">Edição de perfil</a>
         ${Number(state.profile?.is_admin || 0) === 1 ? `<a href="./admin.html" role="menuitem">Admin</a>` : ""}
         <a href="./settings.html" role="menuitem">Configurações</a>
@@ -420,7 +416,6 @@
       if (!state.session?.user) {
         authLink.hidden = false;
         accountMenu.hidden = true;
-        ensureNotificationsButton().hidden = true;
         ensureMessagesLink().hidden = true;
         return;
       }
@@ -430,14 +425,12 @@
       renderMenu();
       window.setTimeout(() => {
         loadMessagesUnreadCount();
-        loadNotifications();
       }, 1200);
       startMessagesPolling();
     } catch (error) {
       console.warn("Não foi possível carregar o menu da conta.", error);
       authLink.hidden = false;
       accountMenu.hidden = true;
-      ensureNotificationsButton().hidden = true;
       ensureMessagesLink().hidden = true;
     } finally {
       setTopbarLoading(false);
@@ -475,7 +468,6 @@
 
   setTopbarLoading(true);
   ensureCreateListingButton();
-  ensureNotificationsButton();
   ensureTopbarActionLoader();
   init();
 })();

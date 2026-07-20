@@ -1,5 +1,6 @@
 import { deleteR2Object, getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
+import { dispatchPostToDiscord } from "../../_shared/discord_auto_post.js";
 
 const VALID_TYPES = new Set(["post", "video", "listing"]);
 const VALID_MEDIA_PREFIXES = ["posts/", "videos/", "market/"];
@@ -218,7 +219,8 @@ async function createMentionNotifications(env, { post, author, body }) {
   }
 }
 
-export async function onRequestPost({ request, env }) {
+export async function onRequestPost(context) {
+  const { request, env } = context;
   let mediaKeys = [];
   try {
     const auth = await requireAuthUser(request, env);
@@ -230,6 +232,13 @@ export async function onRequestPost({ request, env }) {
     const fallbackMediaKey = cleanText(payload.mediaKey, 500);
     const fallbackMediaType = cleanText(payload.mediaType, 120) || null;
     const postType = inferPostType(payload.type, fallbackMediaKey, fallbackMediaType);
+    if (postType !== "listing") {
+      await deleteUploadedMedia(env, [
+        fallbackMediaKey,
+        ...(Array.isArray(payload.mediaItems) ? payload.mediaItems.flatMap((item) => [item?.key, item?.thumbnailKey]) : []),
+      ].filter(Boolean));
+      return jsonResponse({ error: "No momento, o Gimerr aceita apenas anúncios do Marketplace." }, { status: 400 });
+    }
     const body = postType === "listing"
       ? cleanBodyText(payload.body, 1200)
       : cleanText(payload.body, 220);
@@ -303,6 +312,13 @@ export async function onRequestPost({ request, env }) {
     })().catch((error) => {
       console.warn("Falha ao notificar usuários marcados.", error);
     });
+
+    const discordDispatch = dispatchPostToDiscord(env, post.id).catch((error) => {
+      console.warn("Falha ao publicar no Discord.", error);
+    });
+    if (typeof context.waitUntil === "function") {
+      context.waitUntil(discordDispatch);
+    }
 
     return jsonResponse({ post });
   } catch (error) {

@@ -19,7 +19,7 @@
         <svg aria-hidden="true" viewBox="0 0 24 24">
           <path d="M10.8 18.1a7.3 7.3 0 1 1 5.1-2.1l4 4-1.4 1.4-4-4a7.3 7.3 0 0 1-3.7 1Zm0-2a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6Z"/>
         </svg>
-        <input id="global-search" type="search" placeholder="Buscar jogos, posts e anúncios" aria-label="Buscar jogos, posts, anúncios e usuários">
+        <input id="global-search" type="search" placeholder="Buscar jogos e anúncios" aria-label="Buscar jogos, anúncios e usuários">
       </div>
 
       <nav class="top-actions" aria-label="Ações principais">
@@ -49,7 +49,7 @@
             <h2 id="composer-title">Nova publicação</h2>
             <button class="ghost-icon" id="close-composer" type="button" aria-label="Fechar novo anúncio">x</button>
           </div>
-          <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação">
+          <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação" hidden>
             <button class="tab-button" type="button" data-composer-mode="post" role="tab" aria-selected="false">Post</button>
             <button class="tab-button is-active" type="button" data-composer-mode="listing" role="tab" aria-selected="true">Anúncio</button>
           </div>
@@ -131,7 +131,7 @@
           </div>
         </section>
 
-        <div class="filter-bar" aria-label="Filtrar feed">
+        <div class="filter-bar" aria-label="Filtrar feed" hidden>
           <button class="filter-chip is-active" type="button" data-filter="all">
             Tudo
             <span class="filter-count" data-filter-count="all" hidden>0</span>
@@ -142,7 +142,7 @@
           </button>
         </div>
 
-        <div class="marketplace-feed-search" id="marketplace-feed-search" hidden>
+        <div class="marketplace-feed-search" id="marketplace-feed-search">
           <label for="marketplace-search">Buscar no Marketplace</label>
           <input id="marketplace-search" type="search" placeholder="Buscar anúncio, game, item ou vendedor">
         </div>
@@ -153,40 +153,6 @@
         </div>
       </section>
 
-      <aside class="right-rail" aria-label="Informações">
-        <section class="panel ad-rail-panel" id="index-ad-rail" data-adcash-rail>
-          <div class="section-head">
-            <h2>Publicidade</h2>
-            <span>Gimerr</span>
-          </div>
-          <div class="ad-provider-slot is-loading" id="index-ad-provider-slot" data-ad-slot aria-label="Publicidade AdCash" aria-busy="true" hidden>
-            <span class="ad-loader-line ad-loader-line-wide"></span>
-            <span class="ad-loader-line"></span>
-          </div>
-          <div class="ad-fallback-grid" id="index-ad-fallback-grid" aria-label="Sugestões Gimerr">
-            <a class="ad-fallback-card" href="./game.html">
-              <strong>Descubra novos games</strong>
-              <span>Encontre comunidades e conteúdos recentes.</span>
-            </a>
-            <a class="ad-fallback-card" href="./">
-              <strong>Crie anúncios</strong>
-              <span>Publique imagens e vídeos dos seus itens disponíveis para venda.</span>
-            </a>
-            <a class="ad-fallback-card" href="./ads-center.html" aria-disabled="true">
-              <strong>Central de Ads</strong>
-              <span>Em breve, anúncios próprios no Gimerr.</span>
-            </a>
-          </div>
-        </section>
-
-        <section class="panel live-panel" id="live-panel" hidden>
-          <div class="section-head">
-            <h2>Agora</h2>
-            <span>ao vivo</span>
-          </div>
-          <div class="live-stack" id="live-stack"></div>
-        </section>
-      </aside>
     </main>
   </div>
 
@@ -215,7 +181,7 @@
   <script src="./user-search.js" defer></script>
   <script src="./navbar.js" defer></script>
   <script src="./video-player.js" defer></script>
-  <script src="./adcash-ads.js" defer></script>
+  <script src="./adcash-ads.js?v=20260720-marketplace-inline" defer></script>
   <script src="./media-lightbox.js" defer></script>
   <script src="./vendor/qrcode.js" defer></script>
   <script src="./share-modal.js" defer></script>

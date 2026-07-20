@@ -18,7 +18,7 @@ const POST_VIDEO_MAX_BYTES = 500 * 1024 * 1024;
 const STANDARD_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 const state = {
-  filter: "all",
+  filter: "listing",
   search: "",
   marketplaceSearch: "",
   composerMode: "listing",
@@ -2376,7 +2376,7 @@ function updateListingItemAddButton(itemCount = state.listingItemDrafts.length) 
 }
 
 function setComposerMode(mode) {
-  state.composerMode = mode === "listing" ? "listing" : "post";
+  state.composerMode = "listing";
   const isListing = state.composerMode === "listing";
   els.composer?.classList.toggle("is-listing-mode", isListing);
   els.composer?.classList.remove("is-listing-blocked");
@@ -2498,7 +2498,7 @@ function clearComposerRouteFlag() {
 }
 
 function openComposerAndFocus() {
-  setComposerMode("post");
+  setComposerMode("listing");
   setComposerOpen(true);
   window.setTimeout(() => els.composerText?.focus(), 80);
 }
@@ -2666,15 +2666,26 @@ function renderPostTextBlock(post, textHtml) {
   `;
 }
 
+function renderMarketplaceAdAfter(index, total) {
+  if (total < 1) return "";
+  const position = index + 1;
+  const interval = 10;
+  const firstAdPosition = total < interval ? Math.max(1, Math.ceil(total / 2)) : interval;
+  const shouldInsert = position === firstAdPosition || (position > firstAdPosition && (position - firstAdPosition) % interval === 0);
+  if (!shouldInsert) return "";
+  return window.GimerrAdcashAds?.renderMarketplaceAdCard?.() || "";
+}
+
 function renderFeed({ prepareVideos = true } = {}) {
   window.GimerrVideoPlayer?.stopAll?.(els.feedList);
   const query = state.search.trim().toLowerCase();
   const marketplaceQuery = state.marketplaceSearch.trim().toLowerCase();
   if (els.marketplaceSearchWrap) {
-    els.marketplaceSearchWrap.hidden = state.filter !== "listing";
+    els.marketplaceSearchWrap.hidden = false;
   }
-  els.feedList?.classList.toggle("is-marketplace-grid", state.filter === "listing");
+  els.feedList?.classList.add("is-marketplace-grid");
   const filtered = posts.filter((post) => {
+    if (!isMarketplacePost(post)) return false;
     const game = post.game || getGame(post.gameId);
     const matchesSearch = !query || [post.body, game?.name, post.author?.displayName, post.author?.username]
       .join(" ")
@@ -2686,10 +2697,7 @@ function renderFeed({ prepareVideos = true } = {}) {
       post.author?.displayName,
       post.author?.username,
     ].join(" ").toLowerCase().includes(marketplaceQuery);
-    const matchesScope = state.filter === "listing"
-      ? isMarketplacePost(post)
-      : !isMarketplacePost(post);
-    return matchesScope && matchesSearch && (state.filter !== "listing" || matchesMarketplaceSearch);
+    return matchesSearch && matchesMarketplaceSearch;
   });
   els.feedList?.classList.toggle("is-empty", !filtered.length);
 
@@ -2703,19 +2711,19 @@ function renderFeed({ prepareVideos = true } = {}) {
     const loaderHtml = state.feedHasMore
       ? `
         <div class="post-card empty-state">
-          ${state.filter === "listing" ? "Nenhum anúncio por aqui ainda." : "Nada novo por aqui."}
+          Nenhum anúncio por aqui ainda.
           <button class="text-button" type="button" data-feed-load-more ${state.feedLoading ? "disabled" : ""}>
             ${state.feedLoading ? "Carregando..." : "Carregar mais"}
           </button>
         </div>
       `
-      : `<div class="post-card empty-state">${state.filter === "listing" ? "Nenhum anúncio por aqui ainda." : "Nada novo por aqui."}</div>`;
+      : `<div class="post-card empty-state">Nenhum anúncio por aqui ainda.</div>`;
     els.feedList.innerHTML = loaderHtml;
     renderFilterCounts();
     return;
   }
 
-  const feedHtml = filtered.map((post) => {
+  const feedHtml = filtered.map((post, index) => {
     const game = post.game || getGame(post.gameId);
     const author = post.author || {};
     const authorName = author.displayName || "Usuário Gimerr";
@@ -2726,7 +2734,7 @@ function renderFeed({ prepareVideos = true } = {}) {
       ? getListingPreviewText(listingData)
       : post.body;
     const isListing = isMarketplacePost(post);
-    return `
+    const cardHtml = `
       <article class="post-card${isListing ? " marketplace-post-card" : ""}">
         ${media}
         <div class="post-body">
@@ -2760,6 +2768,7 @@ function renderFeed({ prepareVideos = true } = {}) {
         </div>
       </article>
     `;
+    return `${cardHtml}${isListing ? renderMarketplaceAdAfter(index, filtered.length) : ""}`;
   }).join("");
   const loaderHtml = state.feedHasMore
     ? `
@@ -2772,6 +2781,7 @@ function renderFeed({ prepareVideos = true } = {}) {
     : "";
   els.feedList.innerHTML = `${feedHtml}${loaderHtml}`;
   if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
+  window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
   renderFilterCounts();
   observeFeedSentinel();
 }
@@ -3026,7 +3036,7 @@ function setPublishing(isPublishing, label = "Publicar") {
 
 async function publishPost() {
   const text = els.composerText.value.trim();
-  const type = getPostTypeFromComposer(state.composerSelectedFiles);
+  const type = "listing";
   const listingItems = type === "listing" ? getListingItemsFromComposer() : [];
   const itemImageFiles = listingItems.map((item) => item.file).filter(Boolean);
   const videoFiles = state.composerSelectedFiles;

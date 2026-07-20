@@ -1,8 +1,14 @@
 (function initGimerrAdcashAds() {
   const ADCASH_SRC = "https://acscdn.com/script/aclib.js";
-  const ADCASH_ZONE_ID = "11701982";
+  const DEFAULT_ADCASH_MARKETPLACE_ZONE_ID = "11767214";
   let adcashPromise = null;
-  let activeRailContext = null;
+  let adsConfigPromise = null;
+  const activeInlineContexts = new Set();
+  let inlineAdCounter = 0;
+
+  function hasAdcashRunner() {
+    return Boolean(window.aclib?.runBanner);
+  }
 
   function isAdcashError(event) {
     const filename = String(event?.filename || "");
@@ -14,7 +20,7 @@
   }
 
   function loadAdcash() {
-    if (window.aclib?.runBanner) return Promise.resolve(window.aclib);
+    if (hasAdcashRunner()) return Promise.resolve(window.aclib);
     if (adcashPromise) return adcashPromise;
 
     adcashPromise = new Promise((resolve, reject) => {
@@ -37,26 +43,41 @@
     return adcashPromise;
   }
 
+  function getAdsConfig() {
+    if (adsConfigPromise) return adsConfigPromise;
+    adsConfigPromise = fetch("/api/ads-config", {
+      headers: { accept: "application/json" },
+    })
+      .then((response) => response.ok ? response.json() : {})
+      .catch(() => ({}));
+    return adsConfigPromise;
+  }
+
   function slotHasNoFillMessage(slot) {
     return /no ads to display|placement #\d+|no fill|sem anúncios/i.test(slot.textContent || "");
   }
 
   function slotLooksFilled(slot) {
     if (!slot || slotHasNoFillMessage(slot)) return false;
-    if (slot.querySelector("iframe, img, video, canvas")) return true;
-    const rect = slot.getBoundingClientRect();
-    return rect.height > 80 && rect.width > 120 && (slot.textContent || "").trim().length > 0;
+    return Boolean(slot.querySelector("iframe, img, video, canvas, object, embed"));
   }
 
-  function setState(panel, slot, fallback, state) {
-    activeRailContext = state === "loading" ? { panel, slot, fallback } : activeRailContext;
-    panel.dataset.adState = state;
-    panel.classList.toggle("has-external-ad", state === "filled");
+  function setInlineState(card, slot, fallback, state) {
+    const context = { card, slot, fallback };
+    if (state === "loading") {
+      activeInlineContexts.add(context);
+    } else {
+      [...activeInlineContexts].forEach((item) => {
+        if (item.card === card) activeInlineContexts.delete(item);
+      });
+    }
+    card.dataset.adState = state;
+    card.classList.toggle("has-external-ad", state === "filled");
     slot.setAttribute("aria-busy", state === "loading" ? "true" : "false");
-    slot.hidden = state !== "filled";
+    slot.hidden = state === "fallback";
     slot.classList.toggle("is-filled", state === "filled");
     slot.classList.toggle("is-loading", state === "loading");
-    if (fallback) fallback.hidden = state === "filled";
+    if (fallback) fallback.hidden = state !== "fallback";
   }
 
   function waitForSlotFill(slot, timeoutMs = 6200) {
@@ -76,21 +97,55 @@
     });
   }
 
-  async function mountIndexRail() {
-    const panel = document.querySelector("[data-adcash-rail]");
-    if (!panel || panel.dataset.adMounted === "true") return;
+  function renderMarketplaceAdCard() {
+    inlineAdCounter += 1;
+    const slotId = `marketplace-ad-provider-slot-${Date.now()}-${inlineAdCounter}`;
+    return `
+      <article class="post-card marketplace-post-card marketplace-ad-card" data-adcash-marketplace-card>
+        <div class="marketplace-ad-frame">
+          <div class="ad-provider-slot marketplace-ad-provider-slot is-loading" id="${slotId}" data-adcash-marketplace-slot aria-label="Publicidade AdCash" aria-busy="true">
+            <span class="ad-loader-line ad-loader-line-wide"></span>
+            <span class="ad-loader-line"></span>
+          </div>
+          <a class="listing-placeholder-card marketplace-ad-fallback" data-adcash-marketplace-fallback href="./ads-center.html" aria-disabled="true" hidden>
+            <span class="listing-placeholder-title">Anuncie no Gimerr</span>
+          </a>
+        </div>
+        <div class="post-body">
+          <div>
+            <p class="post-text">Publicidade</p>
+          </div>
+          <span class="channel-line">
+            <span class="channel-game-logo" aria-hidden="true">
+              <img src="./assets/logo-square.svg" alt="">
+            </span>
+            <span>Gimerr Ads</span>
+          </span>
+          <div class="post-action-bar post-action-bar--listing listing-card-meta">
+            <span>Patrocinado</span>
+          </div>
+        </div>
+      </article>
+    `;
+  }
 
-    const slot = panel.querySelector("#index-ad-provider-slot");
-    const fallback = panel.querySelector("#index-ad-fallback-grid");
-    if (!slot) return;
+  async function mountMarketplaceAdSlot(slot) {
+    if (!slot || slot.dataset.adMounted === "true") return;
+    const card = slot.closest("[data-adcash-marketplace-card]");
+    const fallback = card?.querySelector("[data-adcash-marketplace-fallback]");
+    if (!card) return;
 
-    panel.dataset.adMounted = "true";
-    setState(panel, slot, fallback, "loading");
+    slot.dataset.adMounted = "true";
+    setInlineState(card, slot, fallback, "loading");
     slot.replaceChildren();
 
     try {
-      await loadAdcash();
-      if (!window.aclib?.runBanner) {
+      const [config] = await Promise.all([
+        getAdsConfig(),
+        loadAdcash(),
+      ]);
+      const zoneId = String(config?.banner?.marketplaceZoneId || DEFAULT_ADCASH_MARKETPLACE_ZONE_ID).trim();
+      if (!zoneId || !hasAdcashRunner()) {
         throw new Error("Biblioteca AdCash indisponível após carregamento.");
       }
 
@@ -98,7 +153,11 @@
       runner.type = "text/javascript";
       runner.text = `
         try {
-          aclib.runBanner({ zoneId: '${ADCASH_ZONE_ID}' });
+          if (aclib.runBanner) {
+            aclib.runBanner({ zoneId: ${JSON.stringify(zoneId)} });
+          } else {
+            throw new Error("AdCash runner indisponível.");
+          }
         } catch (error) {
           window.dispatchEvent(new CustomEvent("gimerr:adcash-error", {
             detail: { message: error && error.message ? error.message : String(error || "AdCash error") }
@@ -108,18 +167,31 @@
       slot.appendChild(runner);
 
       const filled = await waitForSlotFill(slot);
-      setState(panel, slot, fallback, filled ? "filled" : "fallback");
+      setInlineState(card, slot, fallback, filled ? "filled" : "fallback");
     } catch (error) {
       console.warn("Publicidade AdCash indisponível. Usando fallback Gimerr.", error);
-      setState(panel, slot, fallback, "fallback");
+      setInlineState(card, slot, fallback, "fallback");
     }
   }
 
+  function prepareMarketplaceAds(root = document) {
+    root.querySelectorAll("[data-adcash-marketplace-slot]").forEach((slot) => {
+      mountMarketplaceAdSlot(slot);
+    });
+  }
+
   window.addEventListener("gimerr:adcash-error", (event) => {
-    if (!activeRailContext) return;
+    if (!activeInlineContexts.size) return;
     console.warn("Publicidade AdCash indisponível. Usando fallback Gimerr.", event.detail?.message || event.detail || event);
-    setState(activeRailContext.panel, activeRailContext.slot, activeRailContext.fallback, "fallback");
+    [...activeInlineContexts].forEach((context) => {
+      setInlineState(context.card, context.slot, context.fallback, "fallback");
+    });
   });
+
+  window.GimerrAdcashAds = {
+    renderMarketplaceAdCard,
+    prepareMarketplaceAds,
+  };
 
   window.addEventListener("error", (event) => {
     if (!isAdcashError(event)) return;
@@ -137,9 +209,4 @@
     }));
   });
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", mountIndexRail, { once: true });
-  } else {
-    mountIndexRail();
-  }
 })();

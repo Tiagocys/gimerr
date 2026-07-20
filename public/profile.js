@@ -21,7 +21,7 @@ const state = {
   postsCount: 0,
   recommendations: [],
   posts: [],
-  feedFilter: "all",
+  feedFilter: "listing",
   profileMissing: false,
   activeCommentPostId: "",
   activeCommentsPostId: "",
@@ -462,6 +462,7 @@ async function loadProfilePosts(client, profileId) {
     .from("public_feed_posts")
     .select("id, profile_id, game_igdb_id, post_type, body, media_url, media_type, media_items, video_status, video_thumbnail_url, processing_error, comment_count, video_view_count, listing_view_count, created_at, game_name, game_slug, game_cover_url", { count: "exact" })
     .eq("profile_id", profileId)
+    .eq("post_type", "listing")
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -1686,9 +1687,8 @@ function renderFeed({ prepareVideos = true } = {}) {
   if (state.profileMissing) return;
   window.GimerrVideoPlayer?.stopAll?.(els.feedList);
   const query = els.search.value.trim().toLowerCase();
-  const posts = state.posts.filter((post) => post.type !== "listing");
   const listings = state.posts.filter((post) => post.type === "listing");
-  const baseItems = state.feedFilter === "listing" ? listings : posts;
+  const baseItems = listings;
   const filtered = baseItems.filter((post) => {
     if (!query) return true;
     const listingData = post.type === "listing" ? getListingCardData(post) : null;
@@ -1699,21 +1699,19 @@ function renderFeed({ prepareVideos = true } = {}) {
       ...(listingData?.items || []).flatMap((item) => [item.name, item.priceLabel]),
     ].join(" ").toLowerCase().includes(query);
   });
-  const isMarketplaceGrid = state.feedFilter === "listing";
+  const isMarketplaceGrid = true;
   els.feedList.classList.toggle("is-marketplace-grid", isMarketplaceGrid);
   els.feedList.classList.toggle("is-empty", !filtered.length);
   if (els.feedSubtitle) {
-    els.feedSubtitle.textContent = state.feedFilter === "listing"
-      ? "Anúncios publicados por este usuário."
-      : "Publicações deste usuário.";
+    els.feedSubtitle.textContent = "Anúncios publicados por este usuário.";
   }
 
   if (!filtered.length) {
-    els.feedList.innerHTML = `<div class="post-card empty-state">${state.feedFilter === "listing" ? "Nenhum anúncio publicado por aqui." : "Nenhum post publicado por aqui."}</div>`;
+    els.feedList.innerHTML = `<div class="post-card empty-state">Nenhum anúncio publicado por aqui.</div>`;
     return;
   }
 
-  els.feedList.innerHTML = filtered.map((post) => {
+  els.feedList.innerHTML = filtered.map((post, index) => {
     const isListing = post.type === "listing";
     const listingData = isListing ? getListingCardData(post) : null;
     const bodyText = isListing ? getListingPreviewText(listingData) : post.body;
@@ -1722,7 +1720,7 @@ function renderFeed({ prepareVideos = true } = {}) {
       ? `./game?slug=${encodeURIComponent(post.gameSlug)}`
       : `./game?id=${encodeURIComponent(post.gameId)}`;
     const authorName = profileInfo.displayName || profileInfo.username || "Usuário Gimerr";
-    return `
+    const cardHtml = `
       <article class="post-card${isListing ? " marketplace-post-card" : ""}">
         ${media}
         ${renderProfilePostTools(post)}
@@ -1741,12 +1739,20 @@ function renderFeed({ prepareVideos = true } = {}) {
         </div>
       </article>
     `;
+    const position = index + 1;
+    const adInterval = 10;
+    const firstAdPosition = filtered.length < adInterval ? Math.max(1, Math.ceil(filtered.length / 2)) : adInterval;
+    const shouldInsertAd = filtered.length >= 1
+      && (position === firstAdPosition || (position > firstAdPosition && (position - firstAdPosition) % adInterval === 0));
+    const adHtml = isListing && shouldInsertAd ? (window.GimerrAdcashAds?.renderMarketplaceAdCard?.() || "") : "";
+    return `${cardHtml}${adHtml}`;
   }).join("");
   if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
+  window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
 }
 
 function setProfileFeedFilter(filter) {
-  state.feedFilter = filter === "listing" ? "listing" : "all";
+  state.feedFilter = "listing";
   els.filterButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.profileFeedFilter === state.feedFilter);
   });

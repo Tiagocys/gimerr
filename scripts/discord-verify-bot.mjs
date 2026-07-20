@@ -5,8 +5,13 @@ const DISCORD_API = "https://discord.com/api/v10";
 const DISCORD_GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
 const VERIFY_BUTTON_CUSTOM_ID = "gimerr_verify_account";
 const DISCORD_TEXT_CHANNEL_TYPE = 0;
+const DISCORD_INTERACTION_APPLICATION_COMMAND = 2;
+const DISCORD_INTERACTION_MESSAGE_COMPONENT = 3;
+const DISCORD_INTERACTION_APPLICATION_COMMAND_AUTOCOMPLETE = 4;
 const GUILDS_INTENT = 1;
 const GUILD_MESSAGES_INTENT = 1 << 9;
+const MANAGE_CHANNELS_PERMISSION = 0x10n;
+const MANAGE_GUILD_PERMISSION = 0x20n;
 
 function loadDotEnv() {
   if (!fs.existsSync(".env")) return;
@@ -64,6 +69,97 @@ async function discordRequest(path, options = {}) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.message || `Discord HTTP ${response.status}`);
   return payload;
+}
+
+function getCommunityCommandDefinition() {
+  return {
+    name: "gimerr",
+    description: "Configure automatic Gimerr Marketplace listings in this channel.",
+    default_member_permissions: String(MANAGE_CHANNELS_PERMISSION | MANAGE_GUILD_PERMISSION),
+    dm_permission: false,
+    options: [
+      {
+        type: 1,
+        name: "setup",
+        description: "Automatically publish Marketplace listings from a game in this channel.",
+        options: [
+          {
+            type: 3,
+            name: "game",
+            description: "Game name or Gimerr game ID.",
+            required: true,
+            autocomplete: true,
+          },
+        ],
+      },
+      {
+        type: 1,
+        name: "remove",
+        description: "Remove automatic Marketplace listings from this channel.",
+        options: [
+          {
+            type: 3,
+            name: "game",
+            description: "Game name or Gimerr game ID.",
+            required: true,
+            autocomplete: true,
+          },
+        ],
+      },
+      {
+        type: 1,
+        name: "status",
+        description: "List active automatic publications in this channel.",
+      },
+    ],
+  };
+}
+
+async function ensureCommunityCommand(applicationId, guildId = "") {
+  if (!applicationId) return;
+  const basePath = guildId
+    ? `/applications/${applicationId}/guilds/${guildId}/commands`
+    : `/applications/${applicationId}/commands`;
+  const command = getCommunityCommandDefinition();
+  const commands = await discordRequest(basePath, { method: "GET" }).catch((error) => {
+    console.warn(`[discord-verify-bot] não foi possível listar comandos: ${error.message}`);
+    return [];
+  });
+  const existing = Array.isArray(commands)
+    ? commands.find((item) => item.name === command.name)
+    : null;
+  if (existing?.id) {
+    await discordRequest(`${basePath}/${existing.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(command),
+    });
+  } else {
+    await discordRequest(basePath, {
+      method: "POST",
+      body: JSON.stringify(command),
+    });
+  }
+  console.log(`[discord-verify-bot] comando /gimerr sincronizado${guildId ? ` na guild ${guildId}` : " globalmente"}`);
+}
+
+async function ensureCommunityCommands(applicationId, readyGuilds = []) {
+  const configuredGuildId = process.env.DISCORD_COMMAND_GUILD_ID || "";
+  const guildIds = configuredGuildId
+    ? [configuredGuildId]
+    : [...new Set((Array.isArray(readyGuilds) ? readyGuilds : [])
+      .map((guild) => guild?.id)
+      .filter(Boolean))];
+
+  if (!guildIds.length) {
+    await ensureCommunityCommand(applicationId);
+    return;
+  }
+
+  for (const guildId of guildIds) {
+    await ensureCommunityCommand(applicationId, guildId).catch((error) => {
+      console.warn(`[discord-verify-bot] não foi possível sincronizar /gimerr na guild ${guildId}: ${error.message}`);
+    });
+  }
 }
 
 async function sendChannelMessage(channelId, content) {
@@ -270,6 +366,26 @@ async function editInteractionResponse(interaction, content, components = []) {
   if (!response.ok) throw new Error(payload.message || `Discord interaction edit HTTP ${response.status}`);
 }
 
+async function respondAutocomplete(interaction, choices = []) {
+  const response = await fetch(`${DISCORD_API}/interactions/${interaction.id}/${interaction.token}/callback`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      type: 8,
+      data: {
+        choices: choices.slice(0, 25).map((choice) => ({
+          name: String(choice.name || "").slice(0, 100),
+          value: String(choice.value || choice.name || "").slice(0, 100),
+        })),
+      },
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.message || `Discord autocomplete HTTP ${response.status}`);
+}
+
 async function handleVerifyInteraction({ apiBase, token, interaction }) {
   const component = interaction.data;
   if (component?.custom_id !== VERIFY_BUTTON_CUSTOM_ID) return;
@@ -337,6 +453,171 @@ async function handleVerifyInteraction({ apiBase, token, interaction }) {
   console.warn(`[discord-verify-bot] falha por botão ${discordId}: ${payload.error || response.status}`);
 }
 
+function getInteractionSubcommand(interaction) {
+  return Array.isArray(interaction?.data?.options) ? interaction.data.options[0] : null;
+}
+
+function getInteractionOption(options, name) {
+  const option = (Array.isArray(options) ? options : []).find((item) => item.name === name);
+  return option?.value;
+}
+
+function findFocusedOption(options = []) {
+  for (const option of Array.isArray(options) ? options : []) {
+    if (option.focused) return option;
+    const child = findFocusedOption(option.options);
+    if (child) return child;
+  }
+  return null;
+}
+
+async function fetchGameAutocompleteChoices(apiBase, query) {
+  const term = String(query || "").trim();
+  if (term.length < 2) return [];
+
+  const response = await fetch(`${apiBase}/api/games/search?q=${encodeURIComponent(term)}&limit=12`, {
+    headers: { accept: "application/json" },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || `Gimerr search HTTP ${response.status}`);
+  const games = Array.isArray(payload.games) ? payload.games : [];
+  return games
+    .filter((game) => game?.name)
+    .map((game) => ({
+      name: game.name,
+      value: game.name,
+    }));
+}
+
+async function callChannelSubscriptionBackend({ apiBase, token, interaction, action, contentType = "", gameQuery = "" }) {
+  const user = interaction.member?.user || interaction.user || {};
+  const response = await fetch(`${apiBase}/api/discord/channel-subscriptions`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({
+      action,
+      contentType,
+      gameQuery,
+      discordUserId: user.id,
+      discordUsername: user.global_name || user.username || "",
+      guildId: interaction.guild_id,
+      guildName: interaction.guild?.name || "",
+      channelId: interaction.channel_id,
+      channelName: interaction.channel?.name || "",
+      memberPermissions: interaction.member?.permissions || "0",
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  return { response, payload };
+}
+
+function getContentTypeLabel(contentType) {
+  if (contentType === "listing") return "anúncios do Marketplace";
+  return "conteúdos";
+}
+
+function formatStatusResponse(subscriptions = []) {
+  if (!subscriptions.length) {
+    return "Este canal ainda não tem publicações automáticas configuradas.";
+  }
+  const rows = subscriptions.map((item) => {
+    const gameName = item.gameName || `Jogo ${item.gameId}`;
+    return `• ${gameName}: ${getContentTypeLabel(item.contentType)}`;
+  });
+  return ["Publicações automáticas ativas neste canal:", ...rows].join("\n");
+}
+
+async function handleCommunityCommandInteraction({ apiBase, token, interaction }) {
+  if (interaction.type !== DISCORD_INTERACTION_APPLICATION_COMMAND || interaction.data?.name !== "gimerr") return;
+
+  const subcommand = getInteractionSubcommand(interaction);
+  const action = subcommand?.name || "";
+  if (!["setup", "configurar", "remove", "remover", "status"].includes(action)) {
+    await respondInteraction(interaction, "Comando Gimerr inválido.");
+    return;
+  }
+
+  try {
+    await deferInteraction(interaction);
+  } catch (error) {
+    console.error(`[discord-verify-bot] não foi possível responder comando ${interaction.id} a tempo`, error);
+    return;
+  }
+
+  const gameQuery = getInteractionOption(subcommand?.options, "game") || getInteractionOption(subcommand?.options, "jogo") || "";
+  const apiAction = action === "setup" || action === "configurar" ? "configure" : action === "remove" || action === "remover" ? "remove" : "status";
+
+  let results;
+  try {
+    results = [await callChannelSubscriptionBackend({
+      apiBase,
+      token,
+      interaction,
+      action: apiAction,
+      contentType: "listing",
+      gameQuery,
+    })];
+  } catch (error) {
+    await editInteractionResponse(interaction, "Não consegui falar com o Gimerr agora. Tente novamente em alguns instantes.").catch(() => {});
+    console.error("[discord-verify-bot] backend indisponível para configuração de canal", error);
+    return;
+  }
+
+  const failedResult = results.find((result) => !result.response.ok);
+  if (failedResult) {
+    await editInteractionResponse(interaction, failedResult.payload.error || "Não foi possível configurar este canal.");
+    return;
+  }
+
+  if (apiAction === "status") {
+    const payload = results[0]?.payload || {};
+    await editInteractionResponse(interaction, formatStatusResponse(payload.subscriptions || []));
+    return;
+  }
+
+  if (apiAction === "remove") {
+    const gameName = results.find((result) => result.payload?.game?.name)?.payload?.game?.name || gameQuery;
+    const removedCount = results.reduce((total, result) => total + Number(result.payload?.removed || 0), 0);
+    const labels = results.map((result) => getContentTypeLabel(result.payload?.contentType || "listing"));
+    const message = removedCount
+      ? `Pronto. Este canal não receberá mais ${labels.join(" e ")} de ${gameName}.`
+      : `Não encontrei uma configuração ativa para ${labels.join(" ou ")} de ${gameName} neste canal.`;
+    await editInteractionResponse(interaction, message);
+    return;
+  }
+
+  const gameName = results.find((result) => result.payload?.game?.name || result.payload?.subscription?.gameName)?.payload?.game?.name
+    || results.find((result) => result.payload?.subscription?.gameName)?.payload?.subscription?.gameName
+    || gameQuery;
+  const labels = results.map((result) => getContentTypeLabel(result.payload?.contentType || "listing"));
+  await editInteractionResponse(
+    interaction,
+    `Pronto. Este canal receberá automaticamente ${labels.join(" e ")} de ${gameName}.`,
+  );
+}
+
+async function handleCommunityCommandAutocomplete({ apiBase, interaction }) {
+  if (interaction.type !== DISCORD_INTERACTION_APPLICATION_COMMAND_AUTOCOMPLETE || interaction.data?.name !== "gimerr") return;
+
+  const focused = findFocusedOption(interaction.data?.options);
+  if (focused?.name !== "game") {
+    await respondAutocomplete(interaction, []);
+    return;
+  }
+
+  try {
+    const choices = await fetchGameAutocompleteChoices(apiBase, focused.value);
+    await respondAutocomplete(interaction, choices);
+  } catch (error) {
+    console.warn(`[discord-verify-bot] autocomplete de jogos indisponível: ${error.message}`);
+    await respondAutocomplete(interaction, []).catch(() => {});
+  }
+}
+
 async function getChannelName(channelId, cache) {
   if (cache.has(channelId)) return cache.get(channelId);
   const channel = await discordRequest(`/channels/${channelId}`);
@@ -400,14 +681,25 @@ function connectGateway() {
     if (packet.t === "READY") {
       console.log(`[discord-verify-bot] pronto como ${packet.d.user.username}`);
       socket.gimerrBotUserId = packet.d.user.id;
+      socket.gimerrApplicationId = packet.d.application?.id || packet.d.user.id;
+      await ensureCommunityCommands(socket.gimerrApplicationId, packet.d.guilds || []).catch((error) => {
+        console.error("[discord-verify-bot] erro ao sincronizar comando /gimerr", error);
+      });
       await ensureVerifyButtonMessage(process.env.DISCORD_VERIFY_CHANNEL_ID, packet.d.user.id).catch((error) => {
         console.error("[discord-verify-bot] erro ao garantir mensagem de verificação", error);
       });
       return;
     }
 
-    if (packet.t === "GUILD_CREATE" && !process.env.DISCORD_VERIFY_CHANNEL_ID) {
+    if (packet.t === "GUILD_CREATE") {
       const guild = packet.d;
+      if (socket.gimerrApplicationId) {
+        await ensureCommunityCommand(socket.gimerrApplicationId, guild.id).catch((error) => {
+          console.warn(`[discord-verify-bot] não foi possível sincronizar /gimerr na guild ${guild.id}: ${error.message}`);
+        });
+      }
+      if (process.env.DISCORD_VERIFY_CHANNEL_ID) return;
+
       const configuredGuildId = process.env.DISCORD_GUILD_ID;
       if (configuredGuildId && guild.id !== configuredGuildId) return;
 
@@ -425,9 +717,19 @@ function connectGateway() {
     }
 
     if (packet.t === "INTERACTION_CREATE") {
-      handleVerifyInteraction({ apiBase, token, interaction: packet.d }).catch((error) => {
-        console.error("[discord-verify-bot] erro ao processar botão de verificação", error);
-      });
+      if (packet.d.type === DISCORD_INTERACTION_MESSAGE_COMPONENT) {
+        handleVerifyInteraction({ apiBase, token, interaction: packet.d }).catch((error) => {
+          console.error("[discord-verify-bot] erro ao processar botão de verificação", error);
+        });
+      } else if (packet.d.type === DISCORD_INTERACTION_APPLICATION_COMMAND) {
+        handleCommunityCommandInteraction({ apiBase, token, interaction: packet.d }).catch((error) => {
+          console.error("[discord-verify-bot] erro ao processar comando do Gimerr", error);
+        });
+      } else if (packet.d.type === DISCORD_INTERACTION_APPLICATION_COMMAND_AUTOCOMPLETE) {
+        handleCommunityCommandAutocomplete({ apiBase, interaction: packet.d }).catch((error) => {
+          console.error("[discord-verify-bot] erro ao processar autocomplete do Gimerr", error);
+        });
+      }
       return;
     }
 

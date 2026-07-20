@@ -19,7 +19,7 @@
     followerCount: 0,
     following: false,
     feed: [],
-    filter: "all",
+    filter: "listing",
     marketplaceSearch: "",
     activeCommentPostId: "",
     activeCommentsPostId: "",
@@ -2025,7 +2025,7 @@
       ${platforms.map((platform) => `<span class="info-pill">${escapeHtml(platform)}</span>`).join("")}
     `;
 
-    els.feedSubtitle.textContent = `Publicações e anúncios publicados em ${game.name}.`;
+    els.feedSubtitle.textContent = `Anúncios publicados em ${game.name}.`;
     if (els.marketplaceSearchLabel) {
       els.marketplaceSearchLabel.textContent = `Buscar no Marketplace do ${game.name}`;
     }
@@ -2078,7 +2078,7 @@
   }
 
   function setFeedFilter(filter, { scroll = false } = {}) {
-    state.filter = filter || "all";
+    state.filter = "listing";
     els.filterButtons.forEach((item) => {
       item.classList.toggle("is-active", item.dataset.gameFeedFilter === state.filter);
     });
@@ -2086,6 +2086,16 @@
     if (scroll) {
       document.querySelector(".filter-bar")?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+  }
+
+  function renderMarketplaceAdAfter(index, total) {
+    if (total < 1) return "";
+    const position = index + 1;
+    const interval = 10;
+    const firstAdPosition = total < interval ? Math.max(1, Math.ceil(total / 2)) : interval;
+    const shouldInsert = position === firstAdPosition || (position > firstAdPosition && (position - firstAdPosition) % interval === 0);
+    if (!shouldInsert) return "";
+    return window.GimerrAdcashAds?.renderMarketplaceAdCard?.() || "";
   }
 
   function renderFeed({ prepareVideos = true } = {}) {
@@ -2105,10 +2115,10 @@
           ...(listingData.items || []).flatMap((item) => [item.name, item.priceLabel]),
         ].join(" ").toLowerCase().includes(marketplaceQuery);
       });
-    const filtered = state.filter === "listing" ? searchedListings : posts;
-    const isListingFilter = state.filter === "listing";
+    const filtered = searchedListings;
+    const isListingFilter = true;
     if (els.marketplaceSearchWrap) {
-      els.marketplaceSearchWrap.hidden = !isListingFilter;
+      els.marketplaceSearchWrap.hidden = false;
     }
     els.postsCount.textContent = formatCount(posts.length);
     els.listingsCount.textContent = formatCount(listings.length);
@@ -2116,17 +2126,17 @@
     els.feedList.classList.toggle("is-empty", !filtered.length);
 
     if (!filtered.length) {
-      els.feedList.innerHTML = `<div class="post-card empty-state">${isListingFilter ? "Nenhum anúncio publicado para este jogo." : "Nenhum post publicado para este jogo."}</div>`;
+      els.feedList.innerHTML = `<div class="post-card empty-state">Nenhum anúncio publicado para este jogo.</div>`;
       return;
     }
 
-    els.feedList.innerHTML = filtered.map((post) => {
+    els.feedList.innerHTML = filtered.map((post, index) => {
       if (post.type !== "listing") {
         const author = post.author || {};
         const authorName = author.displayName || author.username || "Usuário Gimerr";
         const authorHandle = author.username ? `@${author.username}` : "";
         const media = renderPostMedia(post);
-        return `
+        const cardHtml = `
           <article class="post-card">
             ${media}
             <div class="post-body">
@@ -2158,11 +2168,12 @@
             </div>
           </article>
         `;
+        return cardHtml;
       }
       const listingData = getListingCardData(post);
       const bodyText = getListingCardPreviewText(listingData);
       const media = renderPostMedia(post);
-      return `
+      const cardHtml = `
       <article class="post-card marketplace-post-card">
         ${media}
         <div class="post-body">
@@ -2179,8 +2190,10 @@
         </div>
       </article>
     `;
+      return `${cardHtml}${renderMarketplaceAdAfter(index, filtered.length)}`;
     }).join("");
     if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
+    window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
   }
 
   async function loadGame() {

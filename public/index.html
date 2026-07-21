@@ -23,7 +23,7 @@
       </div>
 
       <nav class="top-actions" aria-label="Ações principais">
-        <button class="primary-button navbar-create-listing" id="open-composer" type="button" data-create-listing-button aria-controls="composer" aria-expanded="false">
+        <button class="primary-button navbar-create-listing" id="open-composer" type="button" data-create-listing-button aria-controls="composer" aria-expanded="false" hidden>
           + Criar
         </button>
         <a class="auth-button" href="./sign-in.html" hidden>Entrar</a>
@@ -44,16 +44,16 @@
       </aside>
 
       <section class="feed-column" aria-label="Feed">
-        <section class="composer is-listing-mode" id="composer" hidden>
+        <section class="composer" id="composer" hidden>
           <div class="composer-mobile-head">
             <h2 id="composer-title">Nova publicação</h2>
             <button class="ghost-icon" id="close-composer" type="button" aria-label="Fechar novo anúncio">x</button>
           </div>
-          <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação" hidden>
-            <button class="tab-button" type="button" data-composer-mode="post" role="tab" aria-selected="false">Post</button>
-            <button class="tab-button is-active" type="button" data-composer-mode="listing" role="tab" aria-selected="true">Anúncio</button>
+          <div class="composer-tabs" role="tablist" aria-label="Tipo de publicação">
+            <button class="tab-button is-active" type="button" data-composer-mode="post" role="tab" aria-selected="true">Post</button>
+            <button class="tab-button" type="button" data-composer-mode="listing" role="tab" aria-selected="false">Anúncio</button>
           </div>
-          <textarea id="composer-text" rows="4" maxlength="1200" placeholder="Descreva seu anúncio: itens, condições de compra, troca, entrega ou outras informações importantes."></textarea>
+          <textarea id="composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser."></textarea>
           <div class="composer-mention-suggestions" id="composer-mention-suggestions" hidden></div>
           <div class="listing-video-upload">
             <label class="text-button upload-button" for="composer-file">
@@ -126,14 +126,14 @@
             <p class="composer-submit-helper" id="composer-listing-helper" hidden></p>
             <div class="composer-actions">
               <button class="text-button" id="cancel-listing-edit" type="button" hidden>Cancelar edição</button>
-              <button class="primary-button" id="publish-post" type="button">Publicar anúncio</button>
+              <button class="primary-button" id="publish-post" type="button">Publicar post</button>
             </div>
           </div>
         </section>
 
-        <div class="filter-bar" aria-label="Filtrar feed" hidden>
+        <div class="filter-bar" aria-label="Filtrar feed">
           <button class="filter-chip is-active" type="button" data-filter="all">
-            Tudo
+            Posts
             <span class="filter-count" data-filter-count="all" hidden>0</span>
           </button>
           <button class="filter-chip" type="button" data-filter="listing">
@@ -142,7 +142,7 @@
           </button>
         </div>
 
-        <div class="marketplace-feed-search" id="marketplace-feed-search">
+        <div class="marketplace-feed-search" id="marketplace-feed-search" hidden>
           <label for="marketplace-search">Buscar no Marketplace</label>
           <input id="marketplace-search" type="search" placeholder="Buscar anúncio, game, item ou vendedor">
         </div>
@@ -179,13 +179,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="./auth-client.js" defer></script>
   <script src="./user-search.js" defer></script>
-  <script src="./navbar-no-bell.js?v=20260720-no-bell" defer></script>
-  <script src="./video-player.js" defer></script>
-  <script src="./adcash-ads.js?v=20260720-marketplace-inline" defer></script>
+  <script src="./navbar.js?v=20260721-public-feed" defer></script>
+  <script src="./video-player.js?v=20260721-public-feed" defer></script>
+  <script src="./adcash-ads.js?v=20260721-adcash-zones" defer></script>
   <script src="./media-lightbox.js" defer></script>
   <script src="./vendor/qrcode.js" defer></script>
   <script src="./share-modal.js" defer></script>
   <script src="./report-modal.js" defer></script>
-  <script src="./app.js" defer></script>
+  <script src="./app.js?v=20260721-public-feed-2" defer></script>
 </body>
 </html>

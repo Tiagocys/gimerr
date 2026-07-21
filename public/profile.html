@@ -64,21 +64,14 @@
           </button>
           <div class="stat-button stat-static">
             <strong id="posts-count">0</strong>
-            <span id="posts-count-label">anúncios</span>
+            <span id="posts-count-label">publicações</span>
           </div>
         </div>
       </section>
 
       <section class="profile-content" aria-label="Conteúdo do usuário">
-        <div class="profile-feed-header">
-          <div>
-            <h2>Conteúdo</h2>
-            <p id="profile-feed-subtitle">Anúncios publicados.</p>
-          </div>
-        </div>
-
-        <div class="filter-bar" aria-label="Filtrar conteúdo do perfil" hidden>
-          <button class="filter-chip is-active" type="button" data-profile-feed-filter="all">Tudo</button>
+        <div class="filter-bar" aria-label="Filtrar conteúdo do perfil">
+          <button class="filter-chip is-active" type="button" data-profile-feed-filter="all">Posts</button>
           <button class="filter-chip" type="button" data-profile-feed-filter="listing">Marketplace</button>
         </div>
 
@@ -109,14 +102,15 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./auth-client.js"></script>
+  <script src="./private-page.js?v=20260721-private" defer></script>
   <script src="./user-search.js" defer></script>
-  <script src="./navbar-no-bell.js?v=20260720-no-bell" defer></script>
-  <script src="./video-player.js" defer></script>
-  <script src="./adcash-ads.js?v=20260720-marketplace-inline" defer></script>
+  <script src="./navbar.js?v=20260721-public-feed" defer></script>
+  <script src="./video-player.js?v=20260721-public-feed" defer></script>
+  <script src="./adcash-ads.js?v=20260721-adcash-zones" defer></script>
   <script src="./media-lightbox.js" defer></script>
   <script src="./vendor/qrcode.js" defer></script>
   <script src="./share-modal.js" defer></script>
   <script src="./report-modal.js" defer></script>
-  <script src="./profile.js?v=20260720-profile-feed-fix" defer></script>
+  <script src="./profile.js?v=20260721-public-feed" defer></script>
 </body>
 </html>

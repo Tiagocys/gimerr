@@ -232,13 +232,6 @@ export async function onRequestPost(context) {
     const fallbackMediaKey = cleanText(payload.mediaKey, 500);
     const fallbackMediaType = cleanText(payload.mediaType, 120) || null;
     const postType = inferPostType(payload.type, fallbackMediaKey, fallbackMediaType);
-    if (postType !== "listing") {
-      await deleteUploadedMedia(env, [
-        fallbackMediaKey,
-        ...(Array.isArray(payload.mediaItems) ? payload.mediaItems.flatMap((item) => [item?.key, item?.thumbnailKey]) : []),
-      ].filter(Boolean));
-      return jsonResponse({ error: "No momento, o Gimerr aceita apenas anúncios do Marketplace." }, { status: 400 });
-    }
     const body = postType === "listing"
       ? cleanBodyText(payload.body, 1200)
       : cleanText(payload.body, 220);

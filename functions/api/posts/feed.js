@@ -1,4 +1,4 @@
-import { getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
+import { getSupabaseRestUrl, getSupabaseUrl, jsonResponse } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
 import { fetchIgnoredProfileIds, inFilter } from "../../_shared/ignored-users.js";
 
@@ -42,6 +42,13 @@ function cleanNumber(value, fallback, { min = 0, max = 20 } = {}) {
 }
 
 async function fetchPreferenceIds(env, profileId) {
+  if (!profileId) {
+    return {
+      followedGameIds: new Set(),
+      recommendedProfileIds: new Set(),
+    };
+  }
+
   const headers = getServiceHeaders(env);
   const [gamesResponse, recommendationsResponse] = await Promise.all([
     fetch(`${getSupabaseRestUrl(env)}/game_follows?select=game_igdb_id&profile_id=eq.${profileId}&limit=500`, {
@@ -66,6 +73,24 @@ async function fetchPreferenceIds(env, profileId) {
   };
 }
 
+async function getOptionalAuthUser(request, env) {
+  const authorization = request.headers.get("authorization") || "";
+  if (!authorization.toLowerCase().startsWith("bearer ")) return null;
+
+  const supabaseUrl = getSupabaseUrl(env);
+  const supabaseAnonKey = env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) return null;
+
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      apikey: supabaseAnonKey,
+      authorization,
+    },
+  });
+  const user = await response.json().catch(() => null);
+  return response.ok ? user : null;
+}
+
 function getPreferenceScore(row, preferences) {
   let score = 0;
   if (preferences.followedGameIds.has(String(row.game_igdb_id))) score += 2;
@@ -75,20 +100,18 @@ function getPreferenceScore(row, preferences) {
 
 export async function onRequestGet({ request, env }) {
   try {
-    const auth = await requireAuthUser(request, env);
-    if (auth.error) return auth.error;
+    const user = await getOptionalAuthUser(request, env);
 
     const requestUrl = new URL(request.url);
     const limit = cleanNumber(requestUrl.searchParams.get("limit"), 10, { min: 1, max: 15 });
     const offset = cleanNumber(requestUrl.searchParams.get("offset"), 0, { min: 0, max: 5000 });
     const fetchLimit = limit + 1;
     const queryLimit = Math.min(500, Math.max(fetchLimit, offset + fetchLimit + 60));
-    const ignoredProfileIds = [...(await fetchIgnoredProfileIds(env, auth.user.id))];
-    const preferences = await fetchPreferenceIds(env, auth.user.id);
+    const ignoredProfileIds = user?.id ? [...(await fetchIgnoredProfileIds(env, user.id))] : [];
+    const preferences = await fetchPreferenceIds(env, user?.id || "");
 
     const url = new URL(`${getSupabaseRestUrl(env)}/public_feed_posts`);
     url.searchParams.set("select", "*");
-    url.searchParams.set("post_type", "eq.listing");
     url.searchParams.set("order", "created_at.desc");
     url.searchParams.set("limit", String(queryLimit));
     if (ignoredProfileIds.length) {

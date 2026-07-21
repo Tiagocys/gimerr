@@ -21,7 +21,7 @@ const state = {
   postsCount: 0,
   recommendations: [],
   posts: [],
-  feedFilter: "listing",
+  feedFilter: "all",
   profileMissing: false,
   activeCommentPostId: "",
   activeCommentsPostId: "",
@@ -211,7 +211,7 @@ function renderVideoPoster(post, item) {
   const poster = post.videoThumbnailUrl || "";
   return `
     <div class="video-media" data-video-view-container data-post-id="${escapeHtml(post.id || "")}">
-      <button class="video-lazy-button media-frame" type="button" data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
+      <button class="video-lazy-button media-frame" type="button" data-video-ads="off" data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
         ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
         <span class="video-lazy-play" aria-hidden="true"></span>
       </button>
@@ -463,7 +463,6 @@ async function loadProfilePosts(client, profileId) {
     .from("public_feed_posts")
     .select("id, profile_id, game_igdb_id, post_type, body, media_url, media_type, media_items, video_status, video_thumbnail_url, processing_error, comment_count, video_view_count, listing_view_count, created_at, game_name, game_slug, game_cover_url", { count: "exact" })
     .eq("profile_id", profileId)
-    .eq("post_type", "listing")
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -630,7 +629,7 @@ function renderCounts() {
   els.recommendationsCount.textContent = String(state.recommendationCount);
   els.postsCount.textContent = String(state.postsCount);
   if (els.postsCountLabel) {
-    els.postsCountLabel.textContent = Number(state.postsCount || 0) === 1 ? "anúncio" : "anúncios";
+    els.postsCountLabel.textContent = Number(state.postsCount || 0) === 1 ? "publicação" : "publicações";
   }
 }
 
@@ -1691,8 +1690,8 @@ function renderFeed({ prepareVideos = true } = {}) {
   if (state.profileMissing) return;
   window.GimerrVideoPlayer?.stopAll?.(els.feedList);
   const query = els.search?.value?.trim().toLowerCase() || "";
-  const listings = state.posts.filter((post) => post.type === "listing");
-  const baseItems = listings;
+  const isListingFilter = state.feedFilter === "listing";
+  const baseItems = state.posts.filter((post) => isListingFilter ? post.type === "listing" : post.type !== "listing");
   const filtered = baseItems.filter((post) => {
     if (!query) return true;
     const listingData = post.type === "listing" ? getListingCardData(post) : null;
@@ -1703,15 +1702,17 @@ function renderFeed({ prepareVideos = true } = {}) {
       ...(listingData?.items || []).flatMap((item) => [item.name, item.priceLabel]),
     ].join(" ").toLowerCase().includes(query);
   });
-  const isMarketplaceGrid = true;
+  const isMarketplaceGrid = isListingFilter;
   els.feedList.classList.toggle("is-marketplace-grid", isMarketplaceGrid);
   els.feedList.classList.toggle("is-empty", !filtered.length);
   if (els.feedSubtitle) {
-    els.feedSubtitle.textContent = "Anúncios publicados por este usuário.";
+    els.feedSubtitle.textContent = isListingFilter
+      ? "Anúncios publicados por este usuário."
+      : "Publicações deste usuário.";
   }
 
   if (!filtered.length) {
-    els.feedList.innerHTML = `<div class="post-card empty-state">Nenhum anúncio publicado por aqui.</div>`;
+    els.feedList.innerHTML = `<div class="post-card empty-state">${isListingFilter ? "Nenhum anúncio publicado por aqui." : "Nenhuma publicação por aqui."}</div>`;
     return;
   }
 
@@ -1748,15 +1749,15 @@ function renderFeed({ prepareVideos = true } = {}) {
     const firstAdPosition = filtered.length < adInterval ? Math.max(1, Math.ceil(filtered.length / 2)) : adInterval;
     const shouldInsertAd = filtered.length >= 1
       && (position === firstAdPosition || (position > firstAdPosition && (position - firstAdPosition) % adInterval === 0));
-    const adHtml = isListing && shouldInsertAd ? (window.GimerrAdcashAds?.renderMarketplaceAdCard?.() || "") : "";
+    const adHtml = isListingFilter && isListing && shouldInsertAd ? (window.GimerrAdcashAds?.renderMarketplaceAdCard?.() || "") : "";
     return `${cardHtml}${adHtml}`;
   }).join("");
   if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
-  window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
+  if (isListingFilter) window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
 }
 
 function setProfileFeedFilter(filter) {
-  state.feedFilter = "listing";
+  state.feedFilter = filter === "listing" ? "listing" : "all";
   els.filterButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.profileFeedFilter === state.feedFilter);
   });

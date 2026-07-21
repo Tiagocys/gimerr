@@ -7378,7 +7378,7 @@ button.listing-detail-item-media:focus-visible {
     order: 3;
   }
 
-  .top-actions .ghost-icon:not(.message-nav-link) {
+  .top-actions .ghost-icon:not(.message-nav-link):not(.notification-button) {
     display: none;
   }
 

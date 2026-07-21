@@ -18,10 +18,10 @@ const POST_VIDEO_MAX_BYTES = 500 * 1024 * 1024;
 const STANDARD_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
 const state = {
-  filter: "listing",
+  filter: "all",
   search: "",
   marketplaceSearch: "",
-  composerMode: "listing",
+  composerMode: "post",
   listingCurrency: "",
   editingListingPostId: "",
   editingListingVideoItem: null,
@@ -2216,8 +2216,10 @@ async function hydrateAuthenticatedHome() {
   try {
     const { data } = await window.GimerrAuth.getSession();
     if (!data.session?.user) {
-      window.location.replace("./sign-in.html");
-      return false;
+      state.signedIn = false;
+      state.session = null;
+      cleanAuthUrl();
+      return true;
     }
 
     state.signedIn = true;
@@ -2226,8 +2228,9 @@ async function hydrateAuthenticatedHome() {
     return true;
   } catch (error) {
     console.warn("Não foi possível carregar sessão do usuário.", error);
-    window.location.replace("./sign-in.html");
-    return false;
+    state.signedIn = false;
+    state.session = null;
+    return true;
   }
 }
 
@@ -2312,7 +2315,7 @@ async function loadFeedPosts({ append = false } = {}) {
     const response = await fetch(`/api/posts/feed?limit=${state.feedPageSize}&offset=${offset}`, {
       headers: {
         accept: "application/json",
-        authorization: `Bearer ${state.session.access_token}`,
+        ...(state.session?.access_token ? { authorization: `Bearer ${state.session.access_token}` } : {}),
       },
     });
     const payload = await response.json().catch(() => ({}));
@@ -2376,7 +2379,7 @@ function updateListingItemAddButton(itemCount = state.listingItemDrafts.length) 
 }
 
 function setComposerMode(mode) {
-  state.composerMode = "listing";
+  state.composerMode = mode === "listing" ? "listing" : "post";
   const isListing = state.composerMode === "listing";
   els.composer?.classList.toggle("is-listing-mode", isListing);
   els.composer?.classList.remove("is-listing-blocked");
@@ -2498,7 +2501,7 @@ function clearComposerRouteFlag() {
 }
 
 function openComposerAndFocus() {
-  setComposerMode("listing");
+  setComposerMode("post");
   setComposerOpen(true);
   window.setTimeout(() => els.composerText?.focus(), 80);
 }
@@ -2623,7 +2626,7 @@ function countNewPostsForFilter(filter) {
     const matchesRecommendedProfile = recommendedProfileIds.has(String(post.author?.id));
     const matchesFollowedSource = matchesFollowedGame || matchesRecommendedProfile;
     if (getPostTime(post) <= seenTime) return false;
-    if (filter === "all") return matchesFollowedSource;
+    if (filter === "all") return matchesFollowedSource && !isMarketplacePost(post);
     if (filter === "listing") return matchesFollowedSource && isMarketplacePost(post);
     return false;
   }).length;
@@ -2680,12 +2683,14 @@ function renderFeed({ prepareVideos = true } = {}) {
   window.GimerrVideoPlayer?.stopAll?.(els.feedList);
   const query = state.search.trim().toLowerCase();
   const marketplaceQuery = state.marketplaceSearch.trim().toLowerCase();
+  const isListingFilter = state.filter === "listing";
   if (els.marketplaceSearchWrap) {
-    els.marketplaceSearchWrap.hidden = false;
+    els.marketplaceSearchWrap.hidden = !isListingFilter;
   }
-  els.feedList?.classList.add("is-marketplace-grid");
+  els.feedList?.classList.toggle("is-marketplace-grid", isListingFilter);
   const filtered = posts.filter((post) => {
-    if (!isMarketplacePost(post)) return false;
+    const isListing = isMarketplacePost(post);
+    if (isListingFilter ? !isListing : isListing) return false;
     const game = post.game || getGame(post.gameId);
     const matchesSearch = !query || [post.body, game?.name, post.author?.displayName, post.author?.username]
       .join(" ")
@@ -2697,7 +2702,7 @@ function renderFeed({ prepareVideos = true } = {}) {
       post.author?.displayName,
       post.author?.username,
     ].join(" ").toLowerCase().includes(marketplaceQuery);
-    return matchesSearch && matchesMarketplaceSearch;
+    return matchesSearch && (!isListingFilter || matchesMarketplaceSearch);
   });
   els.feedList?.classList.toggle("is-empty", !filtered.length);
 
@@ -2711,13 +2716,13 @@ function renderFeed({ prepareVideos = true } = {}) {
     const loaderHtml = state.feedHasMore
       ? `
         <div class="post-card empty-state">
-          Nenhum anúncio por aqui ainda.
+          ${isListingFilter ? "Nenhum anúncio por aqui ainda." : "Nada novo por aqui."}
           <button class="text-button" type="button" data-feed-load-more ${state.feedLoading ? "disabled" : ""}>
             ${state.feedLoading ? "Carregando..." : "Carregar mais"}
           </button>
         </div>
       `
-      : `<div class="post-card empty-state">Nenhum anúncio por aqui ainda.</div>`;
+      : `<div class="post-card empty-state">${isListingFilter ? "Nenhum anúncio por aqui ainda." : "Nada novo por aqui."}</div>`;
     els.feedList.innerHTML = loaderHtml;
     renderFilterCounts();
     return;
@@ -2768,7 +2773,7 @@ function renderFeed({ prepareVideos = true } = {}) {
         </div>
       </article>
     `;
-    return `${cardHtml}${isListing ? renderMarketplaceAdAfter(index, filtered.length) : ""}`;
+    return `${cardHtml}${isListingFilter && isListing ? renderMarketplaceAdAfter(index, filtered.length) : ""}`;
   }).join("");
   const loaderHtml = state.feedHasMore
     ? `
@@ -2781,7 +2786,7 @@ function renderFeed({ prepareVideos = true } = {}) {
     : "";
   els.feedList.innerHTML = `${feedHtml}${loaderHtml}`;
   if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
-  window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
+  if (isListingFilter) window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
   renderFilterCounts();
   observeFeedSentinel();
 }
@@ -2812,12 +2817,13 @@ async function loadMoreFeedPosts() {
 
 function setFilter(nextFilter) {
   window.GimerrVideoPlayer?.stopAll?.(els.feedList);
-  state.filter = nextFilter;
-  if (Object.prototype.hasOwnProperty.call(state.filterSeenAt, nextFilter)) {
-    state.filterSeenAt[nextFilter] = new Date().toISOString();
+  const filter = nextFilter === "listing" ? "listing" : "all";
+  state.filter = filter;
+  if (Object.prototype.hasOwnProperty.call(state.filterSeenAt, filter)) {
+    state.filterSeenAt[filter] = new Date().toISOString();
   }
   els.filterButtons.forEach((button) => {
-    button.classList.toggle("is-active", button.dataset.filter === nextFilter);
+    button.classList.toggle("is-active", button.dataset.filter === filter);
   });
   renderFilterCounts();
   renderFeed();
@@ -3035,8 +3041,13 @@ function setPublishing(isPublishing, label = "Publicar") {
 }
 
 async function publishPost() {
+  if (!state.session?.access_token) {
+    window.location.assign("./sign-in.html");
+    return;
+  }
+
   const text = els.composerText.value.trim();
-  const type = "listing";
+  const type = getPostTypeFromComposer(state.composerSelectedFiles);
   const listingItems = type === "listing" ? getListingItemsFromComposer() : [];
   const itemImageFiles = listingItems.map((item) => item.file).filter(Boolean);
   const videoFiles = state.composerSelectedFiles;

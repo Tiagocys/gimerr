@@ -1324,6 +1324,10 @@
     await loadSession().catch((error) => {
       console.warn("Não foi possível carregar sessão.", error);
     });
+    if (!state.session?.user) {
+      window.location.replace("./sign-in.html");
+      return;
+    }
     await loadRecommendedProfiles().catch((error) => {
       console.warn("Não foi possível carregar perfis recomendados.", error);
       state.followedProfiles = [];

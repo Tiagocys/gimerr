@@ -54,7 +54,7 @@
             <strong id="game-followers-count">0</strong>
             <span>seguidores</span>
           </button>
-          <button class="stat-button stat-static game-stat-link" id="game-posts-button" type="button" hidden>
+          <button class="stat-button stat-static game-stat-link" id="game-posts-button" type="button">
             <strong id="game-posts-count">0</strong>
             <span>posts</span>
           </button>
@@ -67,19 +67,12 @@
 
       <section class="game-grid">
         <section class="game-content" aria-label="Feed do jogo">
-          <div class="profile-feed-header">
-            <div>
-              <h2>Feed</h2>
-              <p id="game-feed-subtitle">Publicações deste jogo.</p>
-            </div>
-          </div>
-
-          <div class="filter-bar" aria-label="Filtrar feed do jogo" hidden>
-            <button class="filter-chip is-active" type="button" data-game-feed-filter="all">Tudo</button>
+          <div class="filter-bar" aria-label="Filtrar feed do jogo">
+            <button class="filter-chip is-active" type="button" data-game-feed-filter="all">Posts</button>
             <button class="filter-chip" type="button" data-game-feed-filter="listing">Marketplace</button>
           </div>
 
-          <div class="marketplace-feed-search" id="game-marketplace-feed-search">
+          <div class="marketplace-feed-search" id="game-marketplace-feed-search" hidden>
             <label id="game-marketplace-search-label" for="game-marketplace-search">Buscar no Marketplace</label>
             <input id="game-marketplace-search" type="search" placeholder="Buscar anúncio, item ou vendedor">
           </div>
@@ -110,13 +103,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./auth-client.js"></script>
   <script src="./user-search.js" defer></script>
-  <script src="./navbar-no-bell.js?v=20260720-no-bell" defer></script>
-  <script src="./video-player.js" defer></script>
-  <script src="./adcash-ads.js?v=20260720-marketplace-inline" defer></script>
+  <script src="./navbar.js?v=20260721-public-feed" defer></script>
+  <script src="./video-player.js?v=20260721-public-feed" defer></script>
+  <script src="./adcash-ads.js?v=20260721-adcash-zones" defer></script>
   <script src="./media-lightbox.js" defer></script>
   <script src="./vendor/qrcode.js" defer></script>
   <script src="./share-modal.js" defer></script>
   <script src="./report-modal.js" defer></script>
-  <script src="./game.js" defer></script>
+  <script src="./game.js?v=20260721-public-feed" defer></script>
 </body>
 </html>

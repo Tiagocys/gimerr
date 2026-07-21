@@ -1,6 +1,6 @@
 (function initGimerrAdcashAds() {
   const ADCASH_SRC = "https://acscdn.com/script/aclib.js";
-  const DEFAULT_ADCASH_MARKETPLACE_ZONE_ID = "11767214";
+  const DEFAULT_ADCASH_MARKETPLACE_ZONE_ID = "11782734";
   let adcashPromise = null;
   let adsConfigPromise = null;
   const activeInlineContexts = new Set();

@@ -19,7 +19,7 @@
     followerCount: 0,
     following: false,
     feed: [],
-    filter: "listing",
+    filter: "all",
     marketplaceSearch: "",
     activeCommentPostId: "",
     activeCommentsPostId: "",
@@ -2078,7 +2078,7 @@
   }
 
   function setFeedFilter(filter, { scroll = false } = {}) {
-    state.filter = "listing";
+    state.filter = filter === "listing" ? "listing" : "all";
     els.filterButtons.forEach((item) => {
       item.classList.toggle("is-active", item.dataset.gameFeedFilter === state.filter);
     });
@@ -2115,10 +2115,10 @@
           ...(listingData.items || []).flatMap((item) => [item.name, item.priceLabel]),
         ].join(" ").toLowerCase().includes(marketplaceQuery);
       });
-    const filtered = searchedListings;
-    const isListingFilter = true;
+    const isListingFilter = state.filter === "listing";
+    const filtered = isListingFilter ? searchedListings : posts;
     if (els.marketplaceSearchWrap) {
-      els.marketplaceSearchWrap.hidden = false;
+      els.marketplaceSearchWrap.hidden = !isListingFilter;
     }
     els.postsCount.textContent = formatCount(posts.length);
     els.listingsCount.textContent = formatCount(listings.length);
@@ -2126,7 +2126,7 @@
     els.feedList.classList.toggle("is-empty", !filtered.length);
 
     if (!filtered.length) {
-      els.feedList.innerHTML = `<div class="post-card empty-state">Nenhum anúncio publicado para este jogo.</div>`;
+      els.feedList.innerHTML = `<div class="post-card empty-state">${isListingFilter ? "Nenhum anúncio publicado para este jogo." : "Nenhum post publicado para este jogo."}</div>`;
       return;
     }
 
@@ -2190,10 +2190,10 @@
         </div>
       </article>
     `;
-      return `${cardHtml}${renderMarketplaceAdAfter(index, filtered.length)}`;
+      return `${cardHtml}${isListingFilter ? renderMarketplaceAdAfter(index, filtered.length) : ""}`;
     }).join("");
     if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
-    window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
+    if (isListingFilter) window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
   }
 
   async function loadGame() {

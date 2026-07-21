@@ -148,7 +148,14 @@
       }));
   }
 
-  function getFluidOptions(config) {
+  function shouldUseVideoAdsForVideo(video) {
+    if (!shouldUseVideoAds()) return false;
+    if (video?.dataset?.videoAds === "off") return false;
+    if (video?.closest?.("[data-video-ads='off']")) return false;
+    return true;
+  }
+
+  function getFluidOptions(config, video = null) {
     const options = {
       layoutControls: {
         fillToContainer: true,
@@ -159,7 +166,7 @@
       },
     };
 
-    const adList = shouldUseVideoAds() ? getVideoAdList(config) : [];
+    const adList = shouldUseVideoAdsForVideo(video) ? getVideoAdList(config) : [];
     if (adList.length) {
       options.vastOptions = {
         adList,
@@ -204,7 +211,7 @@
         getAdsConfig(),
       ]);
       if (!fluidPlayer || !video.isConnected) return;
-      video._gimerrFluidPlayer = fluidPlayer(video, getFluidOptions(adsConfig));
+      video._gimerrFluidPlayer = fluidPlayer(video, getFluidOptions(adsConfig, video));
       video.dataset.fluidPlayerState = "ready";
       return video._gimerrFluidPlayer;
     } catch (error) {
@@ -267,6 +274,7 @@
     video.dataset.fluidVideo = "true";
     video.dataset.mediaType = button.dataset.videoType || "video/mp4";
     video.dataset.videoPostId = button.dataset.videoPostId || "";
+    if (button.dataset.videoAds) video.dataset.videoAds = button.dataset.videoAds;
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";

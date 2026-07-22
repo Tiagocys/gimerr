@@ -398,8 +398,8 @@
         <a href="./discord-bot.html" role="menuitem">App do Discord</a>
         <a href="./edit-profile.html" role="menuitem">Edição de perfil</a>
         ${Number(state.profile?.is_admin || 0) === 1 ? `<a href="./admin.html" role="menuitem">Admin</a>` : ""}
+        ${Number(state.profile?.is_admin || 0) === 1 ? `<a href="./ads-center.html" role="menuitem">Central de Ads</a>` : `<button type="button" role="menuitem" disabled>Central de Ads <span>em breve</span></button>`}
         <a href="./settings.html" role="menuitem">Configurações</a>
-        <button type="button" role="menuitem" disabled>Central de Ads <span>em breve</span></button>
         <button type="button" role="menuitem" data-sign-out>Sair</button>
       </div>
     `;

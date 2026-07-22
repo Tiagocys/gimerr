@@ -1,7 +1,5 @@
 (function initAdsCenter() {
-  const ADS_CENTER_ENABLED = false;
-
-  function blockAdsCenterAccess() {
+  function blockAdsCenterAccess(message = "A Central de Ads está em desenvolvimento e será liberada em breve.") {
     const modal = document.querySelector("#ads-placement-modal");
     const main = document.querySelector(".ads-center-layout");
     if (modal) modal.hidden = true;
@@ -11,18 +9,13 @@
         <div>
           <span class="ads-center-kicker">Gimerr Ads</span>
           <h1>Central de Ads</h1>
-          <p>A Central de Ads está em desenvolvimento e será liberada em breve.</p>
+          <p>${message}</p>
         </div>
         <div class="ads-center-head-actions">
           <a class="text-button" href="./">Voltar ao feed</a>
         </div>
       </section>
     `;
-  }
-
-  if (!ADS_CENTER_ENABLED) {
-    blockAdsCenterAccess();
-    return;
   }
 
   const config = {
@@ -174,12 +167,31 @@
     closePlacementModal();
   }
 
-  async function requireSession() {
-    if (!window.GimerrAuth?.getSession) return;
+  async function requireAdminAccess() {
+    if (!window.GimerrAuth?.getSession) {
+      window.location.replace("./sign-in.html");
+      return false;
+    }
+
+    const client = await window.GimerrAuth.getClient();
     const { data } = await window.GimerrAuth.getSession().catch(() => ({ data: null }));
     if (!data?.session?.user) {
       window.location.replace("./sign-in.html");
+      return false;
     }
+
+    const { data: profile, error } = await client
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", data.session.user.id)
+      .maybeSingle();
+
+    if (error || Number(profile?.is_admin || 0) !== 1) {
+      blockAdsCenterAccess("Acesso restrito a administradores.");
+      return false;
+    }
+
+    return true;
   }
 
   els.changePlacement?.addEventListener("click", openPlacementModal);
@@ -223,6 +235,11 @@
     setFeedback("Criativo e destino prontos. A próxima etapa será orçamento e pagamento com Stripe.", "success");
   });
 
-  requireSession();
-  openPlacementModal();
+  async function init() {
+    const canAccess = await requireAdminAccess();
+    if (!canAccess) return;
+    openPlacementModal();
+  }
+
+  init();
 })();

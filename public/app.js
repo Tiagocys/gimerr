@@ -102,6 +102,8 @@ const els = {
   composerTitle: document.querySelector("#composer-title"),
   composerText: document.querySelector("#composer-text"),
   composerMentionSuggestions: document.querySelector("#composer-mention-suggestions"),
+  composerEmojiButton: document.querySelector("#composer-emoji-button"),
+  composerEmojiPicker: document.querySelector("#composer-emoji-picker"),
   composerServer: document.querySelector("#composer-server"),
   composerGameLabel: document.querySelector("#composer-game-label"),
   composerGameSearch: document.querySelector("#composer-game-search"),
@@ -639,6 +641,42 @@ function insertMention(profile) {
   closeMentionSuggestions();
   els.composerText.focus();
   els.composerText.setSelectionRange(nextCursor, nextCursor);
+}
+
+function renderComposerEmojiPicker() {
+  if (!els.composerEmojiPicker) return;
+  els.composerEmojiPicker.innerHTML = `<emoji-picker class="gimerr-emoji-picker"></emoji-picker>`;
+}
+
+function setComposerEmojiPickerOpen(open) {
+  if (!els.composerEmojiPicker || !els.composerEmojiButton) return;
+  const shouldOpen = Boolean(open) && state.composerMode === "post";
+  if (shouldOpen && !els.composerEmojiPicker.innerHTML) {
+    renderComposerEmojiPicker();
+  }
+  els.composerEmojiPicker.hidden = !shouldOpen;
+  els.composerEmojiButton.setAttribute("aria-expanded", String(shouldOpen));
+}
+
+function insertComposerEmoji(emoji) {
+  if (!els.composerText || !emoji) return;
+  const textarea = els.composerText;
+  const value = textarea.value || "";
+  const start = Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : value.length;
+  const end = Number.isInteger(textarea.selectionEnd) ? textarea.selectionEnd : start;
+  const nextValue = `${value.slice(0, start)}${emoji}${value.slice(end)}`;
+  const maxLength = Number(textarea.maxLength || 0);
+
+  if (maxLength > 0 && nextValue.length > maxLength) {
+    textarea.focus();
+    return;
+  }
+
+  textarea.value = nextValue;
+  const nextCursor = start + emoji.length;
+  textarea.focus();
+  textarea.setSelectionRange(nextCursor, nextCursor);
+  textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function isVideoFile(file) {
@@ -1476,12 +1514,15 @@ function renderPostActions(post) {
       </div>
     `;
   }
-  return `
-    <div class="post-action-bar">
-      <div class="post-comment-action">
+  const commentButton = state.session?.user ? `
         <button class="post-action-button" type="button" data-post-comment-toggle data-post-id="${postId}">
           Comentar
         </button>
+  ` : "";
+  return `
+    <div class="post-action-bar">
+      <div class="post-comment-action">
+        ${commentButton}
         <button class="post-comment-count" type="button" data-post-comments-toggle data-post-id="${postId}">
           ${escapeHtml(formatCommentCount(post.commentCount))}
         </button>
@@ -2059,7 +2100,11 @@ function renderInlineCommentsPanel(post) {
     ? `<p class="comments-empty">${escapeHtml(error)}</p>`
     : comments.length
       ? comments.map((comment) => renderInlineCommentItem(comment, postId, commentsById)).join("")
-      : `<p class="comments-empty">${isLoading ? "Carregando comentários..." : "Nenhum comentário ainda."}</p>`;
+      : `<p class="comments-empty">${
+        isLoading
+          ? "Carregando comentários..."
+          : `Nenhum comentário ainda.${state.session?.user ? "" : ` <a class="comments-login-link" href="./sign-in.html">Entre para comentar</a>.`}`
+      }</p>`;
   const moreButton = commentState.hasMore
     ? `<button class="text-button inline-comments-more" type="button" data-post-comments-more data-post-id="${escapeHtml(postId)}" ${isLoading ? "disabled" : ""}>${isLoading ? "Carregando..." : "Ver mais comentários"}</button>`
     : "";
@@ -2561,6 +2606,9 @@ function setComposerMode(mode) {
   if (els.composerFileHelper) {
     els.composerFileHelper.textContent = isListing ? "Opcional: 1 vídeo de até 3 minutos e 500 MB." : "";
     els.composerFileHelper.hidden = !isListing;
+  }
+  if (isListing) {
+    setComposerEmojiPickerOpen(false);
   }
   if (state.composerSelectedFiles.length > 1) {
     clearComposerFile();
@@ -3489,6 +3537,10 @@ els.composerText.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("keydown", async (event) => {
+  if (event.key === "Escape" && els.composerEmojiPicker && !els.composerEmojiPicker.hidden) {
+    setComposerEmojiPickerOpen(false);
+    return;
+  }
   if (event.key === "Escape" && !els.listingDetailModal?.hidden) {
     closeListingDetailModal();
     return;
@@ -3510,6 +3562,15 @@ els.composerMentionSuggestions?.addEventListener("mousedown", (event) => {
   event.preventDefault();
   const profile = state.mention.items[Number(button.dataset.mentionIndex || 0)];
   insertMention(profile);
+});
+
+els.composerEmojiButton?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setComposerEmojiPickerOpen(els.composerEmojiPicker?.hidden);
+});
+
+els.composerEmojiPicker?.addEventListener("emoji-click", (event) => {
+  insertComposerEmoji(event.detail?.unicode || event.detail?.emoji?.unicode || "");
 });
 
 els.publishPost.addEventListener("click", publishPost);
@@ -3764,6 +3825,10 @@ document.addEventListener("click", async (event) => {
 
   if (!target.closest("[data-post-menu]")) {
     closePostMenus();
+  }
+
+  if (!target.closest("#composer-emoji-picker") && !target.closest("#composer-emoji-button")) {
+    setComposerEmojiPickerOpen(false);
   }
 
   if (!target.closest("#composer")) {

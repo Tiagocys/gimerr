@@ -4,6 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#111827">
+  <meta name="description" content="Publique momentos dos seus jogos favoritos e anuncie itens que você batalhou para conseguir.">
+  <meta property="og:site_name" content="Gimerr">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Gimerr">
+  <meta property="og:description" content="Publique momentos dos seus jogos favoritos e anuncie itens que você batalhou para conseguir.">
+  <meta property="og:url" content="https://gimerr.com/">
+  <meta property="og:image" content="https://gimerr.com/assets/logo-square-fundo-branco.svg">
+  <meta property="og:image:secure_url" content="https://gimerr.com/assets/logo-square-fundo-branco.svg">
+  <meta property="og:image:type" content="image/svg+xml">
+  <meta property="og:image:alt" content="Gimerr">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Gimerr">
+  <meta name="twitter:description" content="Publique momentos dos seus jogos favoritos e anuncie itens que você batalhou para conseguir.">
+  <meta name="twitter:image" content="https://gimerr.com/assets/logo-square-fundo-branco.svg">
+  <link rel="canonical" href="https://gimerr.com/">
   <link rel="icon" type="image/png" href="/assets/favicon.png">
   <title>Gimerr</title>
   <link rel="stylesheet" href="./styles.css">
@@ -71,7 +86,9 @@
             </label>
             <span id="composer-file-helper">Opcional: 1 vídeo de até 3 minutos e 500 MB.</span>
             <input id="composer-file" class="composer-video-input" type="file" accept="video/mp4,video/webm,video/quicktime">
+            <button class="text-button composer-emoji-button" id="composer-emoji-button" type="button" aria-expanded="false" aria-controls="composer-emoji-picker" aria-label="Abrir emojis">🙂</button>
           </div>
+          <div class="composer-emoji-picker" id="composer-emoji-picker" hidden aria-label="Selecionar emoji"></div>
           <p class="composer-step-helper" id="composer-video-helper" hidden></p>
           <div class="composer-media" id="composer-media" hidden>
             <div class="composer-media-summary">
@@ -193,6 +210,7 @@
   <script src="./vendor/qrcode.js" defer></script>
   <script src="./share-modal.js" defer></script>
   <script src="./report-modal.js" defer></script>
+  <script type="module" src="./vendor/emoji-picker-element/index.js"></script>
   <script src="./app.js?v=20260721-sidebar-infinite" defer></script>
 </body>
 </html>

@@ -1168,6 +1168,51 @@ body.has-mobile-composer-open {
   font-size: 0.86rem;
 }
 
+.composer-emoji-picker {
+  display: block;
+  width: min(100%, 390px);
+  max-height: 380px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.composer-emoji-picker[hidden] {
+  display: none;
+}
+
+.gimerr-emoji-picker {
+  width: 100%;
+  height: min(360px, 58vh);
+  --background: var(--surface);
+  --border-color: var(--line);
+  --button-active-background: var(--blue-soft);
+  --button-hover-background: var(--surface-strong);
+  --category-emoji-padding: 6px;
+  --emoji-padding: 6px;
+  --indicator-color: var(--blue);
+  --input-border-color: var(--line);
+  --input-border-radius: 8px;
+  --input-font-color: var(--ink);
+  --input-placeholder-color: var(--muted);
+  --outline-color: var(--blue);
+}
+
+.composer-emoji-button {
+  min-width: 42px;
+  margin-left: auto;
+  padding: 0 12px;
+  font-weight: 700;
+}
+
+.composer.is-listing-mode .composer-emoji-button,
+.composer.is-listing-mode .composer-emoji-picker {
+  display: none;
+}
+
 .composer-tabs {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -3846,6 +3891,17 @@ video.media-frame {
   justify-self: start;
 }
 
+.comments-login-link {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.comments-login-link:hover,
+.comments-login-link:focus-visible {
+  color: #02132b;
+}
+
 .post-actions {
   justify-content: space-between;
   gap: 10px;
@@ -5811,10 +5867,33 @@ button.listing-detail-item-media:focus-visible {
   object-fit: contain;
 }
 
-.share-qr-card small {
-  color: var(--muted);
-  font-size: 0.8rem;
-  font-weight: 800;
+.share-qr-copy-button {
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.share-qr-copy-button img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.share-qr-copy-button:hover,
+.share-qr-copy-button:focus-visible {
+  background: #eef2ff;
+  outline: 0;
+}
+
+.share-qr-copy-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .share-copy-button {
@@ -5842,84 +5921,6 @@ button.listing-detail-item-media:focus-visible {
   border-color: #bbf7d0;
   background: #ecfdf5;
   color: #166534;
-}
-
-.share-suggestions-head {
-  display: grid;
-  gap: 2px;
-}
-
-.share-suggestions-head strong {
-  font-size: 0.92rem;
-}
-
-.share-suggestions-head small,
-.share-empty {
-  color: var(--muted);
-  font-size: 0.84rem;
-  font-weight: 700;
-}
-
-.share-suggestion-list {
-  display: grid;
-  gap: 8px;
-}
-
-.share-suggestion-item {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  width: 100%;
-  min-height: 58px;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.share-suggestion-item:hover,
-.share-suggestion-item:focus-visible {
-  background: var(--surface-strong);
-  outline: 0;
-}
-
-.share-suggestion-item:disabled {
-  cursor: wait;
-}
-
-.share-suggestion-item.is-sent {
-  border-color: #bbf7d0;
-  background: #f0fdf4;
-  cursor: default;
-}
-
-.share-suggestion-item.is-sent small {
-  color: #15803d;
-}
-
-.share-suggestion-copy {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.share-suggestion-copy strong,
-.share-suggestion-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.share-suggestion-copy span,
-.share-suggestion-item small {
-  color: var(--muted);
-  font-size: 0.84rem;
-  font-weight: 800;
 }
 
 .share-feedback {
@@ -7885,6 +7886,10 @@ button.listing-detail-item-media:focus-visible {
 
   .composer-actions {
     justify-content: stretch;
+  }
+
+  .composer-emoji-picker {
+    width: 100%;
   }
 
   .composer-actions .text-button,

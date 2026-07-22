@@ -1,10 +1,7 @@
 (function initGimerrShareModal() {
   const state = {
     modal: null,
-    profiles: null,
-    loadingProfiles: false,
     post: null,
-    sharedRecipients: new Set(),
   };
 
   function escapeHtml(value) {
@@ -47,12 +44,6 @@
     }
   }
 
-  async function getSession() {
-    if (!window.GimerrAuth) return null;
-    const { data } = await window.GimerrAuth.getSession();
-    return data?.session || null;
-  }
-
   async function copyTextToClipboard(value) {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);
@@ -70,60 +61,67 @@
     input.remove();
   }
 
-  function normalizeProfile(profile) {
-    if (!profile?.id) return null;
-    return {
-      id: profile.id,
-      displayName: profile.display_name || profile.username || "Usuário Gimerr",
-      username: profile.username || "",
-      avatarUrl: profile.avatar_url || "./assets/avatar.svg",
-    };
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = src;
+    });
   }
 
-  async function loadSuggestedProfiles() {
-    if (state.profiles) return state.profiles;
-    const session = await getSession();
-    if (!session?.user) {
-      state.profiles = [];
-      return state.profiles;
+  function canvasToPngBlob(canvas) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Não foi possível gerar a imagem do QR Code."));
+      }, "image/png");
+    });
+  }
+
+  async function copyQrCodeToClipboard() {
+    const { qrFrame } = getModalEls();
+    const svg = qrFrame?.querySelector(".share-qr-code svg");
+    if (!svg) throw new Error("QR Code indisponível para copiar.");
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+      throw new Error("Seu navegador não permite copiar imagens. Use a opção de copiar link.");
     }
 
-    state.loadingProfiles = true;
+    const size = 768;
+    const padding = 48;
+    const logoSize = Math.round(size * 0.2);
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Não foi possível preparar a imagem do QR Code.");
+
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, size, size);
+
+    const svgText = new XMLSerializer().serializeToString(svg);
+    const svgBlob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+    const svgUrl = URL.createObjectURL(svgBlob);
+
     try {
-      const client = await window.GimerrAuth.getClient();
-      const { data: recommendations, error: recommendationsError } = await client
-        .from("profile_recommendations")
-        .select("recommended_id")
-        .eq("recommender_id", session.user.id)
-        .order("created_at", { ascending: false })
-        .limit(30);
+      const qrImage = await loadImage(svgUrl);
+      context.drawImage(qrImage, padding, padding, size - padding * 2, size - padding * 2);
 
-      if (recommendationsError) throw recommendationsError;
-
-      const recommendedIds = [...new Set((recommendations || [])
-        .map((row) => row.recommended_id)
-        .filter((id) => id && id !== session.user.id))];
-
-      if (!recommendedIds.length) {
-        state.profiles = [];
-        return state.profiles;
-      }
-
-      const { data: profiles, error: profilesError } = await client
-        .from("public_profiles")
-        .select("id, display_name, username, avatar_url")
-        .in("id", recommendedIds);
-
-      if (profilesError) throw profilesError;
-
-      const byId = new Map((profiles || []).map((profile) => [profile.id, profile]));
-      state.profiles = recommendedIds
-        .map((id) => normalizeProfile(byId.get(id)))
-        .filter(Boolean);
-      return state.profiles;
+      const logoImage = await loadImage("./assets/logo-square-fundo-branco.svg");
+      const logoX = (size - logoSize) / 2;
+      const logoY = (size - logoSize) / 2;
+      const logoPadding = Math.round(logoSize * 0.12);
+      context.fillStyle = "#ffffff";
+      context.fillRect(logoX - logoPadding, logoY - logoPadding, logoSize + logoPadding * 2, logoSize + logoPadding * 2);
+      context.drawImage(logoImage, logoX, logoY, logoSize, logoSize);
     } finally {
-      state.loadingProfiles = false;
+      URL.revokeObjectURL(svgUrl);
     }
+
+    const blob = await canvasToPngBlob(canvas);
+    await navigator.clipboard.write([
+      new ClipboardItem({ "image/png": blob }),
+    ]);
   }
 
   function ensureModal() {
@@ -137,7 +135,7 @@
         <div class="modal-head">
           <div>
             <h2 id="share-modal-title">Compartilhar post</h2>
-            <p>Envie para alguém que você recomenda ou copie o link.</p>
+            <p>Copie o link ou mostre o QR Code.</p>
           </div>
           <button class="ghost-icon share-modal-close" type="button" data-share-close aria-label="Fechar">×</button>
         </div>
@@ -145,18 +143,13 @@
           <p class="share-qr-description" data-share-qr-description hidden></p>
           <div class="share-qr-loader" data-share-qr-loader hidden>Gerando QR Code...</div>
           <div class="share-qr-frame" data-share-qr-frame hidden></div>
-          <small>Escaneie para abrir este anúncio.</small>
+          <button class="share-qr-copy-button" type="button" data-share-qr-copy aria-label="Copiar imagem do QR Code">
+            <img src="./assets/copy.svg" alt="">
+          </button>
         </div>
         <button class="share-copy-button" type="button" data-share-copy>
           <span>Copiar link</span>
         </button>
-        <div class="share-suggestions-head">
-          <strong>Sugestões</strong>
-          <small>Usuários que você recomenda</small>
-        </div>
-        <div class="share-suggestion-list" data-share-suggestions>
-          <p class="share-empty">Carregando sugestões...</p>
-        </div>
         <p class="field-feedback share-feedback" data-share-feedback role="status"></p>
       </section>
     `;
@@ -173,7 +166,6 @@
     const modal = ensureModal();
     return {
       modal,
-      list: modal.querySelector("[data-share-suggestions]"),
       feedback: modal.querySelector("[data-share-feedback]"),
       title: modal.querySelector("#share-modal-title"),
       copy: modal.querySelector(".modal-head p"),
@@ -192,38 +184,6 @@
     feedback.className = `field-feedback share-feedback ${className}`.trim();
   }
 
-  function renderSuggestions(profiles, { loading = false } = {}) {
-    const { list } = getModalEls();
-    if (!list) return;
-    if (loading) {
-      list.innerHTML = `<p class="share-empty">Carregando sugestões...</p>`;
-      return;
-    }
-    if (!profiles.length) {
-      list.innerHTML = `<p class="share-empty">Você ainda não recomendou usuários para compartilhar por mensagem.</p>`;
-      return;
-    }
-
-    list.innerHTML = profiles.map((profile) => `
-      <button class="share-suggestion-item" type="button" data-share-recipient="${escapeHtml(profile.id)}">
-        <span class="conversation-avatar">
-          <img src="${escapeHtml(profile.avatarUrl || "./assets/avatar.svg")}" alt="">
-        </span>
-        <span class="share-suggestion-copy">
-          <strong>${escapeHtml(profile.displayName)}</strong>
-          ${profile.username ? `<span>@${escapeHtml(profile.username)}</span>` : ""}
-        </span>
-        <small>${state.sharedRecipients.has(profile.id) ? "Enviado" : "Enviar"}</small>
-      </button>
-    `).join("");
-    list.querySelectorAll("[data-share-recipient]").forEach((button) => {
-      if (state.sharedRecipients.has(button.dataset.shareRecipient)) {
-        button.disabled = true;
-        button.classList.add("is-sent");
-      }
-    });
-  }
-
   function renderQrCard() {
     const { title, copy, qrCard, qrDescription, qrFrame, qrLoader } = getModalEls();
     const post = state.post || {};
@@ -231,12 +191,12 @@
     if (title) title.textContent = isListing ? "Compartilhar anúncio" : "Compartilhar post";
     if (copy) {
       copy.textContent = isListing
-        ? "Envie por mensagem, copie o link ou mostre o QR Code."
-        : "Envie para alguém que você recomenda ou copie o link.";
+        ? "Copie o link ou mostre o QR Code do anúncio."
+        : "Copie o link ou mostre o QR Code do post.";
     }
     if (!qrCard || !qrFrame) return;
 
-    const qrMarkup = isListing ? createQrMarkup(post.url) : "";
+    const qrMarkup = createQrMarkup(post.url);
     qrCard.hidden = !qrMarkup;
     qrLoader.hidden = !qrMarkup;
     qrFrame.hidden = true;
@@ -244,7 +204,7 @@
       ? `
         <div class="share-qr-code">
           ${qrMarkup}
-          <img src="./assets/logo-square.svg" alt="Gimerr" data-share-qr-logo>
+          <img src="./assets/logo-square-fundo-branco.svg" alt="Gimerr" data-share-qr-logo>
         </div>
       `
       : "";
@@ -272,68 +232,6 @@
     if (!state.modal) return;
     state.modal.hidden = true;
     state.post = null;
-    state.sharedRecipients = new Set();
-  }
-
-  async function sendPostToProfile(profileId, button) {
-    const session = await getSession();
-    if (!session?.access_token) {
-      window.location.assign("./sign-in.html");
-      return;
-    }
-    const post = state.post;
-    if (!post?.url) return;
-
-    if (state.sharedRecipients.has(profileId)) return;
-    if (button) {
-      button.disabled = true;
-      button.querySelector("small").textContent = "Enviando...";
-    }
-    setFeedback("");
-
-    try {
-      const startResponse = await fetch("/api/messages/start", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${session.access_token}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ recipientId: profileId }),
-      });
-      const startPayload = await startResponse.json().catch(() => ({}));
-      if (!startResponse.ok || !startPayload.conversationId) {
-        throw new Error(startPayload.error || "Não foi possível abrir a conversa.");
-      }
-
-      const body = post.url;
-      const sendResponse = await fetch("/api/messages/send", {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${session.access_token}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          conversationId: startPayload.conversationId,
-          body,
-        }),
-      });
-      const sendPayload = await sendResponse.json().catch(() => ({}));
-      if (!sendResponse.ok) {
-        throw new Error(sendPayload.error || "Não foi possível enviar o link.");
-      }
-
-      setFeedback("Link enviado por mensagem.", "is-success");
-      window.dispatchEvent(new CustomEvent("gimerr:message-sent"));
-    } catch (error) {
-      setFeedback(error.message || "Não foi possível enviar o link.", "is-error");
-      if (button) button.disabled = false;
-      if (button?.querySelector("small")) button.querySelector("small").textContent = "Enviar";
-      return;
-    }
-
-    if (button?.querySelector("small")) button.querySelector("small").textContent = "Enviado";
-    button?.classList.add("is-sent");
-    state.sharedRecipients.add(profileId);
   }
 
   async function handleModalClick(event) {
@@ -359,9 +257,18 @@
       return;
     }
 
-    const recipientButton = target.closest("[data-share-recipient]");
-    if (recipientButton) {
-      await sendPostToProfile(recipientButton.dataset.shareRecipient, recipientButton);
+    const qrCopyButton = target.closest("[data-share-qr-copy]");
+    if (qrCopyButton) {
+      qrCopyButton.disabled = true;
+      try {
+        await copyQrCodeToClipboard();
+        setFeedback("QR Code copiado.", "is-success");
+      } catch (error) {
+        setFeedback(error.message || "Não foi possível copiar o QR Code.", "is-warning");
+      } finally {
+        qrCopyButton.disabled = false;
+      }
+      return;
     }
   }
 
@@ -380,7 +287,6 @@
     };
 
     const modal = ensureModal();
-    state.sharedRecipients = new Set();
     modal.hidden = false;
     setFeedback("");
     const { copyButton } = getModalEls();
@@ -389,16 +295,6 @@
       copyButton.querySelector("span").textContent = "Copiar link";
     }
     renderQrCard();
-    renderSuggestions([], { loading: true });
-
-    try {
-      const profiles = await loadSuggestedProfiles();
-      renderSuggestions(profiles);
-    } catch (error) {
-      console.warn("Não foi possível carregar sugestões de compartilhamento.", error);
-      renderSuggestions([]);
-      setFeedback("Não foi possível carregar sugestões agora.", "is-warning");
-    }
   }
 
   window.GimerrShare = {

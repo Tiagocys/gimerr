@@ -842,7 +842,7 @@
       ? `<p class="comments-empty">${escapeHtml(state.commentsError)}</p>`
       : state.comments.length
         ? state.comments.map((comment) => renderComment(comment, commentsById)).join("")
-        : `<p class="comments-empty">Nenhum comentário ainda.</p>`;
+        : `<p class="comments-empty">Nenhum comentário ainda.${state.session?.user ? "" : ` <a class="comments-login-link" href="./sign-in.html">Entre para comentar</a>.`}</p>`;
     const form = state.session?.user
       ? `
         <form class="comment-form" id="comment-form" data-comment-form>

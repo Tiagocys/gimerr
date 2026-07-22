@@ -961,12 +961,15 @@ function renderPostActions(post) {
       </div>
     `;
   }
-  return `
-    <div class="post-action-bar">
-      <div class="post-comment-action">
+  const commentButton = state.session?.user ? `
         <button class="post-action-button" type="button" data-post-comment-toggle data-post-id="${postId}">
           Comentar
         </button>
+  ` : "";
+  return `
+    <div class="post-action-bar">
+      <div class="post-comment-action">
+        ${commentButton}
         <button class="post-comment-count" type="button" data-post-comments-toggle data-post-id="${postId}">
           ${escapeHtml(formatCommentCount(post.commentCount))}
         </button>
@@ -1444,7 +1447,11 @@ function renderInlineCommentsPanel(post) {
     ? `<p class="comments-empty">${escapeHtml(error)}</p>`
     : comments.length
       ? comments.map((comment) => renderInlineCommentItem(comment, postId, commentsById)).join("")
-      : `<p class="comments-empty">${isLoading ? "Carregando comentários..." : "Nenhum comentário ainda."}</p>`;
+      : `<p class="comments-empty">${
+        isLoading
+          ? "Carregando comentários..."
+          : `Nenhum comentário ainda.${state.session?.user ? "" : ` <a class="comments-login-link" href="./sign-in.html">Entre para comentar</a>.`}`
+      }</p>`;
   const moreButton = commentState.hasMore
     ? `<button class="text-button inline-comments-more" type="button" data-post-comments-more data-post-id="${escapeHtml(postId)}" ${isLoading ? "disabled" : ""}>${isLoading ? "Carregando..." : "Ver mais comentários"}</button>`
     : "";

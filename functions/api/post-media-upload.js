@@ -21,6 +21,11 @@ const TARGETS = {
     accept: /^image\/(jpeg|png|webp)$/,
     maxBytes: 2 * 1024 * 1024,
   },
+  comment: {
+    folder: "comment-pics",
+    accept: /^image\/(jpeg|png|webp|gif)$/,
+    maxBytes: 5 * 1024 * 1024,
+  },
 };
 
 const MIME_EXTENSIONS = {

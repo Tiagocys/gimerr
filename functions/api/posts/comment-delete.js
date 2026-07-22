@@ -1,4 +1,4 @@
-import { getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
+import { deleteR2Object, getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
 
 function cleanText(value, maxLength) {
@@ -10,7 +10,7 @@ function cleanText(value, maxLength) {
 
 async function fetchComment(env, commentId) {
   const url = new URL(`${getSupabaseRestUrl(env)}/post_comments`);
-  url.searchParams.set("select", "id,post_id,profile_id,status");
+  url.searchParams.set("select", "id,post_id,profile_id,status,media_key");
   url.searchParams.set("id", `eq.${commentId}`);
   url.searchParams.set("limit", "1");
 
@@ -58,6 +58,11 @@ export async function onRequestPost({ request, env }) {
     }
 
     await markCommentDeleted(env, comment.id);
+    if (comment.media_key && String(comment.media_key).startsWith("comment-pics/")) {
+      await deleteR2Object(env, comment.media_key).catch((error) => {
+        console.warn("Não foi possível remover imagem do comentário.", error);
+      });
+    }
 
     return jsonResponse({
       ok: true,

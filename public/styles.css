@@ -1203,14 +1203,20 @@ body.has-mobile-composer-open {
 
 .composer-emoji-button {
   min-width: 42px;
-  margin-left: auto;
   padding: 0 12px;
   font-weight: 700;
 }
 
 .composer.is-listing-mode .composer-emoji-button,
-.composer.is-listing-mode .composer-emoji-picker {
+.composer.is-listing-mode .composer-emoji-picker,
+.composer.is-listing-mode .composer-image-upload {
   display: none;
+}
+
+.composer.is-dragging-file {
+  outline: 2px dashed var(--blue);
+  outline-offset: 4px;
+  background: var(--blue-soft);
 }
 
 .composer-tabs {
@@ -1665,6 +1671,7 @@ select {
   font-weight: 800;
 }
 
+.composer-file-input,
 .composer-video-input {
   position: absolute;
   width: 1px;
@@ -3785,6 +3792,24 @@ video.media-frame {
   line-height: 1.45;
 }
 
+.comment-media-button {
+  display: block;
+  width: min(100%, 220px);
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-strong);
+  cursor: pointer;
+}
+
+.comment-media-button img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
 .comment-reply-button {
   justify-self: start;
   min-height: 28px;
@@ -4034,6 +4059,94 @@ video.media-frame {
 
 .inline-comment-form textarea {
   min-height: 74px;
+}
+
+.comment-form-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comment-tool-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.comment-tool-button:hover,
+.comment-tool-button:focus-visible {
+  border-color: var(--blue);
+  background: var(--blue-soft);
+  outline: 0;
+}
+
+.comment-tool-button input {
+  display: none;
+}
+
+.upload-button img,
+.composer-emoji-button img,
+.comment-tool-button img {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.comment-emoji-picker {
+  width: min(100%, 360px);
+  max-height: 360px;
+  overflow: hidden;
+}
+
+.comment-emoji-picker[hidden] {
+  display: none;
+}
+
+.comment-image-preview {
+  position: relative;
+  width: 96px;
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-strong);
+}
+
+.comment-image-preview[hidden] {
+  display: none;
+}
+
+.comment-image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.comment-image-preview button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  color: #fff;
+  cursor: pointer;
 }
 
 .inline-comment-actions {

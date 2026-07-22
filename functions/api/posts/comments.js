@@ -37,6 +37,9 @@ function toPublicComment(row) {
     postId: row.post_id,
     parentCommentId: row.parent_comment_id || null,
     body: row.body,
+    mediaUrl: row.media_url || "",
+    mediaKey: row.media_key || "",
+    mediaType: row.media_type || "",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     author: {
@@ -131,7 +134,7 @@ async function fetchPost(env, postId) {
   return rows[0] || null;
 }
 
-async function createCommentViaRpc(env, token, { postId, body, parentCommentId = null }) {
+async function createCommentViaRpc(env, token, { postId, body, parentCommentId = null, media = null }) {
   if (!token) {
     const error = new Error("Sessão ausente.");
     error.status = 401;
@@ -150,6 +153,9 @@ async function createCommentViaRpc(env, token, { postId, body, parentCommentId =
       comment_post_id: postId,
       comment_body: body,
       comment_parent_comment_id: parentCommentId || null,
+      comment_media_url: media?.url || null,
+      comment_media_key: media?.key || null,
+      comment_media_type: media?.mediaType || null,
     }),
   });
   const rows = await response.json().catch(() => []);
@@ -255,6 +261,30 @@ async function findMentionedProfiles(env, usernames) {
     return [];
   }
   return rows;
+}
+
+function normalizeCommentMedia(value) {
+  const media = value && typeof value === "object" ? value : {};
+  const url = cleanText(media.url || media.mediaUrl, 500);
+  const key = cleanText(media.key || media.mediaKey, 500);
+  const mediaType = cleanText(media.mediaType || media.type, 120);
+  if (!url && !key && !mediaType) return null;
+  if (!url || !key || !mediaType) {
+    const error = new Error("Imagem do comentário inválida.");
+    error.status = 400;
+    throw error;
+  }
+  if (!/^\/api\/media\/comment-pics\/[0-9a-f-]+\//i.test(url) || !/^comment-pics\/[0-9a-f-]+\//i.test(key)) {
+    const error = new Error("Imagem do comentário inválida.");
+    error.status = 400;
+    throw error;
+  }
+  if (!/^image\/(jpeg|png|webp|gif)$/i.test(mediaType)) {
+    const error = new Error("Envie uma imagem JPG, PNG, WebP ou GIF.");
+    error.status = 400;
+    throw error;
+  }
+  return { url, key, mediaType };
 }
 
 async function insertComment(env, payload) {
@@ -504,17 +534,18 @@ export async function onRequestPost({ request, env, waitUntil }) {
     const postId = cleanText(payload.postId || payload.post, 80);
     const parentCommentId = cleanText(payload.parentCommentId || payload.parentComment || "", 80) || null;
     const body = cleanText(payload.body, 500);
+    const media = normalizeCommentMedia(payload.media || null);
 
     if (!postId) {
       return jsonResponse({ error: "Post inválido." }, { status: 400 });
     }
-    if (!body) {
-      return jsonResponse({ error: "Escreva um comentário." }, { status: 400 });
+    if (!body && !media) {
+      return jsonResponse({ error: "Escreva um comentário ou selecione uma imagem." }, { status: 400 });
     }
 
     const token = getBearerToken(request);
     try {
-      const { comment, post, author, parentCommentAuthorId } = await createCommentViaRpc(env, token, { postId, body, parentCommentId });
+      const { comment, post, author, parentCommentAuthorId } = await createCommentViaRpc(env, token, { postId, body, parentCommentId, media });
       scheduleCommentNotifications(waitUntil, Promise.all([
         notifyCommentTarget(env, { post, comment, author, parentCommentAuthorId }),
         notifyMentionedUsers(env, { post, comment, author, excludeIds: [parentCommentAuthorId] }),
@@ -555,6 +586,9 @@ export async function onRequestPost({ request, env, waitUntil }) {
         profile_id: auth.user.id,
         parent_comment_id: parentCommentId,
         body,
+        media_url: media?.url || null,
+        media_key: media?.key || null,
+        media_type: media?.mediaType || null,
       });
     } catch (error) {
       if (isMissingCommentsSchema(error)) {

@@ -69,7 +69,9 @@
     feedSubtitle: document.querySelector("#game-feed-subtitle"),
     composer: document.querySelector("#game-composer"),
     composerText: document.querySelector("#game-composer-text"),
-    composerFile: document.querySelector("#game-composer-file"),
+    composerFile: document.querySelector("#game-composer-video-file") || document.querySelector("#game-composer-file"),
+    composerImageFile: document.querySelector("#game-composer-image-file"),
+    composerVideoFile: document.querySelector("#game-composer-video-file") || document.querySelector("#game-composer-file"),
     composerVideoHelper: document.querySelector("#game-composer-video-helper"),
     composerMedia: document.querySelector("#game-composer-media"),
     composerFileName: document.querySelector("#game-composer-file-name"),
@@ -1368,6 +1370,30 @@
     return `<a class="comment-reply-reference" href="#comment-${escapeHtml(parentId)}">Em resposta a ${escapeHtml(label)}</a>`;
   }
 
+  function renderCommentMedia(comment) {
+    if (!comment?.mediaUrl || !String(comment.mediaType || "").startsWith("image/")) return "";
+    const url = escapeHtml(comment.mediaUrl);
+    return `
+      <button class="comment-media-button" type="button" data-image-lightbox data-image-src="${url}" data-image-alt="Imagem do comentário">
+        <img src="${url}" alt="Imagem do comentário">
+      </button>
+    `;
+  }
+
+  function renderCommentTools() {
+    return `
+      <div class="comment-emoji-picker" data-comment-emoji-picker hidden></div>
+      <div class="comment-form-tools">
+        <label class="comment-tool-button" title="Adicionar imagem">
+          <img src="./assets/camera.svg.svg" alt="" aria-hidden="true">
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-comment-image>
+        </label>
+        <button class="comment-tool-button" type="button" data-comment-emoji aria-label="Abrir emojis"><img src="./assets/emoji.svg.svg" alt="" aria-hidden="true"></button>
+      </div>
+      <div class="comment-image-preview" data-comment-image-preview hidden></div>
+    `;
+  }
+
   function renderInlineCommentReplyForm(postId, comment) {
     if (String(state.replyingToCommentId) !== String(comment.id)) return "";
     if (!state.session?.access_token) {
@@ -1378,6 +1404,7 @@
       <form class="inline-comment-form inline-reply-form" data-inline-comment-form data-post-id="${escapeHtml(postId)}" data-parent-comment-id="${escapeHtml(comment.id)}">
         <textarea maxlength="500" rows="2" placeholder="Responder comentário">${getReplyMention(comment)}</textarea>
         <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
+        ${renderCommentTools()}
         <div class="inline-comment-actions">
           <button class="text-button" type="button" data-comment-reply-cancel>Cancelar</button>
           <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>
@@ -1406,7 +1433,8 @@
               <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
             </div>
             ${renderCommentReplyReference(comment, commentsById)}
-            <p>${renderTextWithMentions(comment.body, author.username)}</p>
+            ${comment.body ? `<p>${renderTextWithMentions(comment.body, author.username)}</p>` : ""}
+            ${renderCommentMedia(comment)}
             <div class="comment-actions">
               <button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>
               ${canDelete ? `
@@ -1494,6 +1522,7 @@
       <form class="inline-comment-form" data-inline-comment-form data-post-id="${escapeHtml(post.id)}">
         <textarea maxlength="500" rows="2" placeholder="Escreva um comentário"></textarea>
         <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
+        ${renderCommentTools()}
         <div class="inline-comment-actions">
           <span>Até 500 caracteres.</span>
           <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>
@@ -1505,6 +1534,92 @@
     `;
   }
 
+  function getCommentImageInput(form) {
+    return form?.querySelector("[data-comment-image]") || null;
+  }
+
+  function getCommentImageFile(form) {
+    return getCommentImageInput(form)?.files?.[0] || null;
+  }
+
+  function validateCommentImageFile(file) {
+    if (!file) return "";
+    if (!/^image\/(jpeg|png|webp|gif)$/i.test(file.type || "")) {
+      return "Envie uma imagem JPG, PNG, WebP ou GIF.";
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      return "A imagem do comentário deve ter no máximo 5 MB.";
+    }
+    return "";
+  }
+
+  function setCommentImagePreview(form) {
+    const preview = form?.querySelector("[data-comment-image-preview]");
+    const file = getCommentImageFile(form);
+    if (!preview) return;
+    if (!file) {
+      preview.hidden = true;
+      preview.innerHTML = "";
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    preview.hidden = false;
+    preview.innerHTML = `
+      <img src="${url}" alt="">
+      <button type="button" data-comment-image-clear aria-label="Remover imagem">×</button>
+    `;
+    preview.querySelector("img")?.addEventListener("load", () => URL.revokeObjectURL(url), { once: true });
+  }
+
+  function clearCommentImage(form) {
+    const input = getCommentImageInput(form);
+    if (input) input.value = "";
+    setCommentImagePreview(form);
+  }
+
+  async function uploadCommentMedia(form) {
+    const file = getCommentImageFile(form);
+    if (!file) return null;
+    const validationMessage = validateCommentImageFile(file);
+    if (validationMessage) throw new Error(validationMessage);
+    const uploaded = await uploadComposerMedia(file, "comment");
+    return {
+      url: uploaded.url,
+      key: uploaded.key,
+      mediaType: uploaded.mediaType,
+    };
+  }
+
+  function renderCommentEmojiPicker(form) {
+    const picker = form?.querySelector("[data-comment-emoji-picker]");
+    if (!picker) return null;
+    if (!picker.innerHTML) {
+      picker.innerHTML = `<emoji-picker class="gimerr-emoji-picker"></emoji-picker>`;
+    }
+    return picker;
+  }
+
+  function toggleCommentEmojiPicker(form) {
+    const picker = renderCommentEmojiPicker(form);
+    if (!picker) return;
+    picker.hidden = !picker.hidden;
+  }
+
+  function insertTextInTextarea(textarea, text) {
+    if (!textarea || !text) return;
+    const value = textarea.value || "";
+    const start = Number.isInteger(textarea.selectionStart) ? textarea.selectionStart : value.length;
+    const end = Number.isInteger(textarea.selectionEnd) ? textarea.selectionEnd : start;
+    const nextValue = `${value.slice(0, start)}${text}${value.slice(end)}`;
+    const maxLength = Number(textarea.maxLength || 0);
+    if (maxLength > 0 && nextValue.length > maxLength) return;
+    textarea.value = nextValue;
+    const cursor = start + text.length;
+    textarea.focus();
+    textarea.setSelectionRange(cursor, cursor);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   async function submitInlineComment(form) {
     const postId = form.dataset.postId || "";
     const parentCommentId = form.dataset.parentCommentId || "";
@@ -1512,7 +1627,8 @@
     const textarea = form.querySelector("textarea");
     const feedback = form.querySelector("[data-inline-comment-feedback]");
     const body = textarea?.value?.trim() || "";
-    if (!postId || !body || state.commentSubmittingPostId) {
+    const imageFile = getCommentImageFile(form);
+    if (!postId || (!body && !imageFile) || state.commentSubmittingPostId) {
       textarea?.focus();
       return;
     }
@@ -1525,6 +1641,7 @@
     }
 
     try {
+      const media = await uploadCommentMedia(form);
       const response = await fetch("/api/posts/comments", {
         method: "POST",
         headers: {
@@ -1532,7 +1649,7 @@
           authorization: `Bearer ${state.session.access_token}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ postId, body, parentCommentId: parentCommentId || null }),
+        body: JSON.stringify({ postId, body, parentCommentId: parentCommentId || null, media }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Não foi possível comentar.");
@@ -1554,6 +1671,8 @@
       } else {
         state.activeCommentPostId = "";
       }
+      textarea.value = "";
+      clearCommentImage(form);
     } catch (error) {
       if (parentCommentId) {
         state.replyingToCommentId = parentCommentId;
@@ -1739,7 +1858,8 @@
   function clearComposerFile(options = {}) {
     revokeComposerPreviewUrls();
     state.composerSelectedFiles = [];
-    if (els.composerFile) els.composerFile.value = "";
+    if (els.composerImageFile) els.composerImageFile.value = "";
+    if (els.composerVideoFile) els.composerVideoFile.value = "";
     if (els.composerMedia) els.composerMedia.hidden = true;
     if (els.composerFileName) els.composerFileName.textContent = "";
     if (els.composerMediaPreviews) els.composerMediaPreviews.innerHTML = "";
@@ -1767,9 +1887,13 @@
   }
 
   async function renderComposerFile() {
-    const selectedFiles = Array.from(els.composerFile?.files || []);
+    const selectedFiles = [
+      ...Array.from(els.composerImageFile?.files || []),
+      ...Array.from(els.composerVideoFile?.files || []),
+    ];
     if (selectedFiles.length) addComposerSelectedFiles(selectedFiles);
-    if (els.composerFile) els.composerFile.value = "";
+    if (els.composerImageFile) els.composerImageFile.value = "";
+    if (els.composerVideoFile) els.composerVideoFile.value = "";
 
     const files = getComposerFiles();
     if (!files.length) {
@@ -1885,9 +2009,14 @@
     if (isListing && els.listingItems && !els.listingItems.children.length) {
       renderListingItems();
     }
-    if (els.composerFile) {
-      els.composerFile.multiple = false;
-      els.composerFile.accept = "video/mp4,video/webm,video/quicktime";
+    if (els.composerImageFile) {
+      els.composerImageFile.accept = "image/jpeg,image/png,image/webp,image/gif";
+      els.composerImageFile.multiple = false;
+      els.composerImageFile.disabled = true;
+    }
+    if (els.composerVideoFile) {
+      els.composerVideoFile.multiple = false;
+      els.composerVideoFile.accept = "video/mp4,video/webm,video/quicktime";
     }
     if (els.publishPost && !els.publishPost.disabled) {
       els.publishPost.textContent = "Publicar anúncio";
@@ -2398,10 +2527,34 @@
     renderFeed();
   });
   els.publishPost?.addEventListener("click", publishGamePost);
-  els.composerFile?.addEventListener("change", () => {
+  function handleGameComposerFileChange() {
     renderComposerFile().catch((error) => {
-      console.warn("Não foi possível validar o vídeo selecionado.", error);
-      setVideoHelperMessage("Não foi possível validar o vídeo selecionado. Tente outro arquivo.", "warning");
+      console.warn("Não foi possível validar o arquivo selecionado.", error);
+      setVideoHelperMessage("Não foi possível validar o arquivo selecionado. Tente outro arquivo.", "warning");
+      markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
+      clearComposerFile({ preserveVideoHelper: true });
+    });
+  }
+  els.composerImageFile?.addEventListener("change", handleGameComposerFileChange);
+  els.composerVideoFile?.addEventListener("change", handleGameComposerFileChange);
+  els.composer?.addEventListener("dragover", (event) => {
+    if (!event.dataTransfer?.types?.includes("Files")) return;
+    event.preventDefault();
+    els.composer.classList.add("is-dragging-file");
+  });
+  els.composer?.addEventListener("dragleave", (event) => {
+    if (event.relatedTarget && els.composer.contains(event.relatedTarget)) return;
+    els.composer.classList.remove("is-dragging-file");
+  });
+  els.composer?.addEventListener("drop", (event) => {
+    const files = Array.from(event.dataTransfer?.files || []);
+    if (!files.length) return;
+    event.preventDefault();
+    els.composer.classList.remove("is-dragging-file");
+    addComposerSelectedFiles(files);
+    renderComposerFile().catch((error) => {
+      console.warn("Não foi possível validar o arquivo arrastado.", error);
+      setVideoHelperMessage("Não foi possível validar o arquivo arrastado. Tente outro arquivo.", "warning");
       markComposerInvalid(els.composer?.querySelector(".listing-video-upload"));
       clearComposerFile({ preserveVideoHelper: true });
     });
@@ -2490,6 +2643,27 @@
   document.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : event.target?.parentElement;
     if (!target) return;
+
+    const commentEmojiButton = target.closest("[data-comment-emoji]");
+    if (commentEmojiButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleCommentEmojiPicker(commentEmojiButton.closest("[data-inline-comment-form]"));
+      return;
+    }
+
+    const commentImageClear = target.closest("[data-comment-image-clear]");
+    if (commentImageClear) {
+      event.preventDefault();
+      clearCommentImage(commentImageClear.closest("[data-inline-comment-form]"));
+      return;
+    }
+
+    if (!target.closest("[data-comment-emoji-picker]") && !target.closest("[data-comment-emoji]")) {
+      document.querySelectorAll("[data-comment-emoji-picker]:not([hidden])").forEach((picker) => {
+        picker.hidden = true;
+      });
+    }
 
     if (
       isFollowersPanelOpen()
@@ -2699,6 +2873,34 @@
     const textarea = event.target instanceof Element ? event.target.closest("[data-inline-comment-form] textarea") : null;
     if (!textarea) return;
     updateCommentMentionSuggestions(textarea);
+  });
+
+  document.addEventListener("change", (event) => {
+    const input = event.target instanceof Element ? event.target.closest("[data-comment-image]") : null;
+    if (!input) return;
+    const form = input.closest("[data-inline-comment-form]");
+    const feedback = form?.querySelector("[data-inline-comment-feedback]");
+    const message = validateCommentImageFile(input.files?.[0] || null);
+    if (message) {
+      if (feedback) {
+        feedback.textContent = message;
+        feedback.className = "field-feedback is-error";
+      }
+      clearCommentImage(form);
+      return;
+    }
+    if (feedback) {
+      feedback.textContent = "";
+      feedback.className = "field-feedback";
+    }
+    setCommentImagePreview(form);
+  });
+
+  document.addEventListener("emoji-click", (event) => {
+    const picker = event.target instanceof Element ? event.target.closest("[data-comment-emoji-picker]") : null;
+    if (!picker) return;
+    const form = picker.closest("[data-inline-comment-form]");
+    insertTextInTextarea(form?.querySelector("textarea"), event.detail?.unicode || event.detail?.emoji?.unicode || "");
   });
 
   document.addEventListener("mousedown", (event) => {

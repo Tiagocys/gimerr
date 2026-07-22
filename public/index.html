@@ -77,18 +77,23 @@
           </div>
           <textarea id="composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser."></textarea>
           <div class="composer-mention-suggestions" id="composer-mention-suggestions" hidden></div>
+          <div class="composer-emoji-picker" id="composer-emoji-picker" hidden aria-label="Selecionar emoji"></div>
           <div class="listing-video-upload">
-            <label class="text-button upload-button" for="composer-file">
-              <svg id="composer-file-icon" aria-hidden="true" viewBox="0 0 24 24">
-                <path d="M17 10.5V6c0-1.1-.9-2-2-2H5C3.9 4 3 4.9 3 6v12c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2v-4.5l4 4v-11l-4 4Z"/>
-              </svg>
-              <span id="composer-file-label">Adicionar vídeo</span>
+            <button class="text-button composer-emoji-button" id="composer-emoji-button" type="button" aria-expanded="false" aria-controls="composer-emoji-picker" aria-label="Abrir emojis">
+              <img src="./assets/emoji.svg.svg" alt="" aria-hidden="true">
+            </button>
+            <label class="text-button upload-button composer-image-upload" for="composer-image-file">
+              <img src="./assets/camera.svg.svg" alt="" aria-hidden="true">
+              <span>Adicionar imagem</span>
+            </label>
+            <label class="text-button upload-button composer-video-upload" for="composer-video-file">
+              <img src="./assets/video.svg.svg" alt="" aria-hidden="true">
+              <span>Adicionar vídeo</span>
             </label>
             <span id="composer-file-helper">Opcional: 1 vídeo de até 3 minutos e 500 MB.</span>
-            <input id="composer-file" class="composer-video-input" type="file" accept="video/mp4,video/webm,video/quicktime">
-            <button class="text-button composer-emoji-button" id="composer-emoji-button" type="button" aria-expanded="false" aria-controls="composer-emoji-picker" aria-label="Abrir emojis">🙂</button>
+            <input id="composer-image-file" class="composer-file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+            <input id="composer-video-file" class="composer-file-input" type="file" accept="video/mp4,video/webm,video/quicktime">
           </div>
-          <div class="composer-emoji-picker" id="composer-emoji-picker" hidden aria-label="Selecionar emoji"></div>
           <p class="composer-step-helper" id="composer-video-helper" hidden></p>
           <div class="composer-media" id="composer-media" hidden>
             <div class="composer-media-summary">

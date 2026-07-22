@@ -58,8 +58,6 @@
     followersButton: document.querySelector("#game-followers-button"),
     followersCount: document.querySelector("#game-followers-count"),
     followersSideCount: document.querySelector("#game-followers-side-count"),
-    postsButton: document.querySelector("#game-posts-button"),
-    postsCount: document.querySelector("#game-posts-count"),
     listingsButton: document.querySelector("#game-listings-button"),
     listingsCount: document.querySelector("#game-listings-count"),
     followersList: document.querySelector("#game-followers-list"),
@@ -2025,7 +2023,9 @@
       ${platforms.map((platform) => `<span class="info-pill">${escapeHtml(platform)}</span>`).join("")}
     `;
 
-    els.feedSubtitle.textContent = `Anúncios publicados em ${game.name}.`;
+    if (els.feedSubtitle) {
+      els.feedSubtitle.textContent = `Anúncios publicados em ${game.name}.`;
+    }
     if (els.marketplaceSearchLabel) {
       els.marketplaceSearchLabel.textContent = `Buscar no Marketplace do ${game.name}`;
     }
@@ -2120,8 +2120,7 @@
     if (els.marketplaceSearchWrap) {
       els.marketplaceSearchWrap.hidden = !isListingFilter;
     }
-    els.postsCount.textContent = formatCount(posts.length);
-    els.listingsCount.textContent = formatCount(listings.length);
+    if (els.listingsCount) els.listingsCount.textContent = formatCount(listings.length);
     els.feedList.classList.toggle("is-marketplace-grid", isListingFilter && filtered.length > 0);
     els.feedList.classList.toggle("is-empty", !filtered.length);
 
@@ -2310,7 +2309,6 @@
   els.followButton.addEventListener("click", toggleFollow);
   els.followersButton?.addEventListener("click", () => setFollowersPanelOpen(!isFollowersPanelOpen()));
   els.followersPanelClose?.addEventListener("click", () => setFollowersPanelOpen(false));
-  els.postsButton?.addEventListener("click", () => setFeedFilter("all", { scroll: true }));
   els.listingsButton?.addEventListener("click", () => setFeedFilter("listing", { scroll: true }));
   els.marketplaceSearch?.addEventListener("input", (event) => {
     state.marketplaceSearch = event.target.value;

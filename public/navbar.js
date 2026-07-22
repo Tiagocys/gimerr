@@ -373,7 +373,7 @@
   async function signOut() {
     const client = await window.GimerrAuth.getClient();
     await client.auth.signOut();
-    window.location.assign("./sign-in.html");
+    window.location.assign("./");
   }
 
   function renderMenu() {

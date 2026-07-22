@@ -16,6 +16,7 @@ const LISTING_VIDEO_THUMBNAIL_QUALITY = 0.72;
 const POST_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const POST_VIDEO_MAX_BYTES = 500 * 1024 * 1024;
 const STANDARD_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const SIDEBAR_PAGE_SIZE = 12;
 
 const state = {
   filter: "all",
@@ -31,6 +32,10 @@ const state = {
   followedGames: [],
   availableGames: [],
   followedProfiles: [],
+  sidebarMode: "guest",
+  sidebarLoading: false,
+  sidebarHasMore: true,
+  sidebarOffset: 0,
   liveUpdates: [],
   preparedMediaFile: null,
   composerSelectedFiles: [],
@@ -76,11 +81,15 @@ const state = {
 };
 
 let feedObserver = null;
+let sidebarObserver = null;
 
 const els = {
+  indexSidebar: document.querySelector("#index-sidebar"),
   followedGamesPanel: document.querySelector("#followed-games-panel"),
+  sidebarGamesTitle: document.querySelector("#sidebar-games-title"),
   serverList: document.querySelector("#server-list"),
   serverCount: document.querySelector("#server-count"),
+  serverListMore: document.querySelector("#server-list-more"),
   feedList: document.querySelector("#feed-list"),
   livePanel: document.querySelector("#live-panel"),
   liveStack: document.querySelector("#live-stack"),
@@ -185,11 +194,13 @@ function cleanAuthUrl() {
 function normalizeFollowedGame(row) {
   const game = row.game || row.igdb_games || {};
   return {
-    id: game.igdb_id,
+    id: game.igdb_id || game.id,
     name: game.name || "Game Gimerr",
     slug: game.slug || "",
-    coverUrl: game.cover_url || "",
+    coverUrl: game.cover_url || game.coverUrl || "",
     followedAt: row.created_at,
+    count: Number(game.count || row.count || 0),
+    source: game.source || row.source || "",
   };
 }
 
@@ -197,9 +208,10 @@ function normalizeFollowedProfile(profile) {
   if (!profile?.id || !profile.username) return null;
   return {
     id: profile.id,
-    displayName: profile.display_name || profile.username || "Usuário Gimerr",
+    displayName: profile.display_name || profile.displayName || profile.username || "Usuário Gimerr",
     username: profile.username,
-    avatarUrl: profile.avatar_url || "",
+    avatarUrl: profile.avatar_url || profile.avatarUrl || "",
+    count: Number(profile.count || 0),
   };
 }
 
@@ -1407,6 +1419,15 @@ function formatListingViewBadge(value) {
   return `${formatListingViewCount(count)} ${count === 1 ? "visualização" : "visualizações"}`;
 }
 
+function formatCompactNumber(value) {
+  const count = Number(value || 0);
+  if (count >= 1000) {
+    const compact = Math.floor(count / 1000);
+    return `${new Intl.NumberFormat("pt-BR").format(compact)}k`;
+  }
+  return new Intl.NumberFormat("pt-BR").format(count);
+}
+
 function formatListingRelativeTime(value) {
   const formatted = formatRelativeTime(value);
   return formatted === "agora" ? "Agora" : formatted;
@@ -2307,6 +2328,43 @@ async function loadRecommendedProfiles() {
     .filter(Boolean);
 }
 
+async function loadIndexSidebar({ append = false } = {}) {
+  if (state.sidebarLoading) return;
+  state.sidebarLoading = true;
+  renderIndexSidebar();
+  try {
+    const offset = append ? state.sidebarOffset : 0;
+    const params = new URLSearchParams({
+      sidebar: "1",
+      sidebarLimit: String(SIDEBAR_PAGE_SIZE),
+      sidebarOffset: String(offset),
+    });
+    const response = await fetch(`/api/posts/feed?${params.toString()}`, {
+      headers: {
+        accept: "application/json",
+        ...(state.session?.access_token ? { authorization: `Bearer ${state.session.access_token}` } : {}),
+      },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Não foi possível carregar a sidebar.");
+
+    state.sidebarMode = payload.mode || (state.signedIn ? "authenticated" : "guest");
+    state.sidebarHasMore = Boolean(payload.hasMore);
+    state.sidebarOffset = Number(payload.nextOffset || 0);
+    const nextGames = (payload.games || [])
+      .map((game) => normalizeFollowedGame({ game }))
+      .filter((game) => game.id);
+    state.followedGames = append ? [...state.followedGames, ...nextGames] : nextGames;
+    const byId = new Map();
+    state.followedGames.forEach((game) => {
+      if (!byId.has(String(game.id))) byId.set(String(game.id), game);
+    });
+    state.followedGames = Array.from(byId.values());
+  } finally {
+    state.sidebarLoading = false;
+  }
+}
+
 async function loadFeedPosts({ append = false } = {}) {
   if (state.feedLoading) return;
   const offset = append ? state.feedOffset : 0;
@@ -2554,26 +2612,64 @@ async function startListingEdit(postId) {
   window.setTimeout(() => els.composerText.focus());
 }
 
-function renderFollowedGames() {
+function formatSidebarCount(count, singular, plural) {
+  const number = Number(count || 0);
+  if (!number) return "";
+  return `${formatCompactNumber(number)} ${number === 1 ? singular : plural}`;
+}
+
+function renderIndexSidebar() {
+  if (!els.indexSidebar) return;
+  els.sidebarGamesTitle.textContent = "Jogos em destaque";
   els.serverCount.textContent = String(state.followedGames.length);
-  els.followedGamesPanel.hidden = true;
 
-  if (!state.followedGames.length) {
-    els.serverList.innerHTML = "";
-    return;
-  }
-
-  els.serverList.innerHTML = state.followedGames.map((game) => `
+  els.serverList.innerHTML = state.followedGames.length ? state.followedGames.map((game) => `
     <a class="server-item" href="${getGameUrl(game)}">
       <div class="server-logo">
         <img src="${escapeHtml(game.coverUrl || "./assets/avatar.svg")}" alt="">
       </div>
       <div class="server-copy">
         <strong>${escapeHtml(game.name)}</strong>
-        <span class="server-meta">Game seguido</span>
+        <span class="server-meta">${escapeHtml(game.source === "followed" ? "Você segue" : (formatSidebarCount(game.count, "post recente", "posts recentes") || "Movimento recente"))}</span>
       </div>
     </a>
-  `).join("");
+  `).join("") : `
+    <p class="sidebar-empty">Os jogos mais movimentados aparecerão aqui.</p>
+  `;
+  if (state.sidebarHasMore || state.sidebarLoading) {
+    els.serverList.insertAdjacentHTML("beforeend", `
+      <div class="sidebar-pagination" data-sidebar-sentinel>
+        ${state.sidebarLoading ? "Carregando..." : "Carregar mais jogos"}
+      </div>
+    `);
+  }
+
+  els.indexSidebar.hidden = false;
+  observeSidebarSentinel();
+}
+
+function observeSidebarSentinel() {
+  if (sidebarObserver) sidebarObserver.disconnect();
+  const sentinel = els.serverList?.querySelector("[data-sidebar-sentinel]");
+  if (!sentinel || !state.sidebarHasMore) return;
+
+  sidebarObserver = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return;
+    loadMoreSidebarGames().catch((error) => {
+      console.warn("Não foi possível carregar mais jogos da sidebar.", error);
+    });
+  }, {
+    root: window.matchMedia("(min-width: 1121px)").matches ? els.indexSidebar : null,
+    rootMargin: "260px 0px",
+    threshold: 0.01,
+  });
+  sidebarObserver.observe(sentinel);
+}
+
+async function loadMoreSidebarGames() {
+  if (state.sidebarLoading || !state.sidebarHasMore) return;
+  await loadIndexSidebar({ append: true });
+  renderIndexSidebar();
 }
 
 function renderLiveStack() {
@@ -3779,13 +3875,14 @@ async function init() {
     clearComposerRouteFlag();
   }
 
-  const followedPromise = withTimeout(loadFollowedGames(), 12000, "A lista de games demorou mais que o esperado.")
+  const sidebarPromise = withTimeout(loadIndexSidebar(), 12000, "A sidebar demorou mais que o esperado.")
     .catch((error) => {
-      console.warn("Não foi possível carregar games seguidos.", error);
+      console.warn("Não foi possível carregar dados da sidebar.", error);
       state.followedGames = [];
+      state.sidebarMode = state.signedIn ? "authenticated" : "guest";
     })
     .finally(() => {
-      renderFollowedGames();
+      renderIndexSidebar();
       renderLiveStack();
       setComposerAvailability();
       renderFeed({ prepareVideos: false });
@@ -3818,7 +3915,7 @@ async function init() {
       renderFeed();
     });
 
-  await Promise.allSettled([followedPromise, followedProfilesPromise, currentProfilePromise, feedPromise]);
+  await Promise.allSettled([sidebarPromise, followedProfilesPromise, currentProfilePromise, feedPromise]);
   if (routeEditListingPostId) {
     await startListingEdit(routeEditListingPostId);
   } else if (routeListingPostId) {

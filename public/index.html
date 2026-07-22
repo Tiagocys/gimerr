@@ -32,15 +32,22 @@
     </header>
 
     <main class="layout">
-      <aside class="left-rail" aria-label="Navegação" hidden>
+      <aside class="left-rail" id="index-sidebar" aria-label="Descobertas" hidden>
+        <section class="panel sidebar-discord-panel" aria-label="App Gimerr no Discord">
+          <img src="./assets/discord.svg" alt="" aria-hidden="true">
+          <p>
+            Conecte o App Gimerr ao seu servidor no Discord.
+            <a href="./discord-bot.html">Configure aqui</a>
+          </p>
+        </section>
+
         <section class="panel" id="followed-games-panel">
           <div class="section-head">
-            <h2>Games seguidos</h2>
+            <h2 id="sidebar-games-title">Jogos em destaque</h2>
             <span id="server-count">0</span>
           </div>
           <div class="server-list" id="server-list"></div>
         </section>
-
       </aside>
 
       <section class="feed-column" aria-label="Feed">
@@ -186,6 +193,6 @@
   <script src="./vendor/qrcode.js" defer></script>
   <script src="./share-modal.js" defer></script>
   <script src="./report-modal.js" defer></script>
-  <script src="./app.js?v=20260721-public-feed-2" defer></script>
+  <script src="./app.js?v=20260721-sidebar-infinite" defer></script>
 </body>
 </html>

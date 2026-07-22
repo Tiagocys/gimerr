@@ -26,6 +26,10 @@
   display: none !important;
 }
 
+body.private-page-pending .app-shell {
+  visibility: hidden;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -584,8 +588,9 @@ button:disabled {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "feed-column";
+  grid-template-columns: 286px minmax(0, 1fr);
+  grid-template-areas: "left-rail feed-column";
+  align-items: start;
   gap: 22px;
   width: min(100%, 1380px);
   margin: 0 auto;
@@ -604,6 +609,11 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  position: sticky;
+  top: 76px;
+  height: calc(100dvh - 92px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .panel,
@@ -698,6 +708,54 @@ h2 {
 .feed-list {
   display: grid;
   gap: 12px;
+}
+
+.sidebar-empty {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.sidebar-discord-panel {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  background: #eef2ff;
+  border-color: #dbe4ff;
+  box-shadow: none;
+}
+
+.sidebar-pagination {
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.sidebar-discord-panel img {
+  width: 34px;
+  height: 34px;
+}
+
+.sidebar-discord-panel p {
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.32;
+}
+
+.sidebar-discord-panel a {
+  color: #5865f2;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.sidebar-discord-panel a:hover {
+  text-decoration: underline;
 }
 
 .ad-provider-slot {
@@ -925,8 +983,18 @@ h2 {
 }
 
 .server-item {
+  display: flex;
+  align-items: center;
   gap: 10px;
   min-width: 0;
+  padding: 8px;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.server-item:hover {
+  background: var(--surface-strong);
 }
 
 .server-logo {
@@ -934,6 +1002,11 @@ h2 {
   height: 42px;
   overflow: hidden;
   background: var(--surface-strong);
+}
+
+.server-logo.avatar-logo {
+  border-radius: 999px;
+  background: transparent;
 }
 
 .server-logo img {
@@ -4437,7 +4510,8 @@ video.media-frame {
 
 .game-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 220px));
+  justify-content: center;
   border-top: 1px solid var(--line);
 }
 
@@ -7314,8 +7388,36 @@ button.listing-detail-item-media:focus-visible {
 @media (max-width: 1120px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "feed-column";
+    grid-template-areas:
+      "left-rail"
+      "feed-column";
     align-items: start;
+  }
+
+  .left-rail {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .left-rail .panel {
+    padding: 12px;
+  }
+
+  .left-rail .server-list {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(180px, 1fr);
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scroll-snap-type: x proximity;
+  }
+
+  .left-rail .server-item {
+    scroll-snap-align: start;
   }
 
 }
@@ -7384,8 +7486,65 @@ button.listing-detail-item-media:focus-visible {
 
   .layout {
     grid-template-columns: 1fr;
-    grid-template-areas: "feed-column";
+    grid-template-areas:
+      "left-rail"
+      "feed-column";
+    gap: 12px;
     padding: 18px 14px 34px;
+  }
+
+  .left-rail {
+    order: 0;
+    gap: 10px;
+  }
+
+  .left-rail .sidebar-discord-panel {
+    display: none;
+  }
+
+  .left-rail #followed-games-panel {
+    padding: 10px;
+    border-radius: 12px;
+    box-shadow: none;
+  }
+
+  .left-rail #followed-games-panel .section-head {
+    margin-bottom: 8px;
+  }
+
+  .left-rail #followed-games-panel .section-head h2 {
+    font-size: 0.86rem;
+  }
+
+  .left-rail #followed-games-panel .section-head span {
+    display: none;
+  }
+
+  .left-rail .server-list {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(132px, 44vw);
+    gap: 8px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding-bottom: 2px;
+  }
+
+  .left-rail .server-item {
+    min-height: 48px;
+    padding: 7px;
+  }
+
+  .left-rail .server-logo {
+    width: 34px;
+    height: 34px;
+  }
+
+  .left-rail .server-copy strong {
+    font-size: 0.82rem;
+  }
+
+  .left-rail .server-meta {
+    font-size: 0.7rem;
   }
 
   .feed-column {

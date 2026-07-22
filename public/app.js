@@ -403,7 +403,7 @@ function clearComposerGameSelection() {
 function getGameUrl(game) {
   if (!game) return "./game";
   return game.slug
-    ? `./game?slug=${encodeURIComponent(game.slug)}`
+    ? `/g/${encodeURIComponent(game.slug)}`
     : `./game?id=${encodeURIComponent(game.id)}`;
 }
 
@@ -1144,6 +1144,7 @@ function renderPostMenu(post, options = {}) {
         ${isListing ? (inListingDetail
           ? `<button type="button" data-listing-close>Fechar anúncio</button>`
           : `<button type="button" data-listing-open data-post-id="${postId}">Ver anúncio</button>`) : ""}
+        ${isListing && !inListingDetail ? `<button type="button" data-post-share data-post-id="${postId}">Compartilhar</button>` : ""}
         ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
         ${!isOwner && post.author?.id ? `<button type="button" data-user-ignore data-profile-id="${escapeHtml(post.author.id)}">Ignorar usuário</button>` : ""}
         ${isOwner && isListing ? `<button type="button" data-listing-edit data-post-id="${postId}">Editar</button>` : ""}
@@ -2049,9 +2050,7 @@ function renderCommentTools() {
 
 function renderInlineCommentReplyForm(postId, comment) {
   if (String(state.replyingToCommentId) !== String(comment.id)) return "";
-  if (!state.session?.access_token) {
-    return `<a class="text-button inline-comment-login" href="./sign-in.html">Entre para responder</a>`;
-  }
+  if (!state.session?.user?.id || !state.session?.access_token) return "";
   const isSubmitting = String(state.commentSubmittingPostId) === String(comment.id);
   return `
     <form class="inline-comment-form inline-reply-form" data-inline-comment-form data-post-id="${escapeHtml(postId)}" data-parent-comment-id="${escapeHtml(comment.id)}">
@@ -2073,6 +2072,7 @@ function renderInlineCommentItem(comment, postId, commentsById) {
   const author = comment.author || {};
   const authorName = author.displayName || "Usuário Gimerr";
   const authorHandle = author.username ? `@${author.username}` : "";
+  const isAuthenticated = Boolean(state.session?.user?.id && state.session?.access_token);
   const canDelete = state.session?.user?.id && String(author.id) === String(state.session.user.id);
   return `
     <div class="comment-thread">
@@ -2089,7 +2089,7 @@ function renderInlineCommentItem(comment, postId, commentsById) {
           ${comment.body ? `<p>${renderTextWithMentions(comment.body, author.username)}</p>` : ""}
           ${renderCommentMedia(comment)}
           <div class="comment-actions">
-            <button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>
+            ${isAuthenticated ? `<button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>` : ""}
             ${canDelete ? `
               <button class="comment-delete-button" type="button" data-comment-delete data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}" aria-label="Apagar comentário" title="Apagar comentário">
                 <img src="./assets/trash.svg" alt="">
@@ -2167,9 +2167,7 @@ async function loadInlineComments(postId, { append = false } = {}) {
 
 function renderInlineCommentForm(post) {
   if (String(state.activeCommentPostId) !== String(post.id)) return "";
-  if (!state.session?.access_token) {
-    return `<a class="text-button inline-comment-login" href="./sign-in.html">Entre para comentar</a>`;
-  }
+  if (!state.session?.user?.id || !state.session?.access_token) return "";
   const isSubmitting = String(state.commentSubmittingPostId) === String(post.id);
   return `
     <form class="inline-comment-form" data-inline-comment-form data-post-id="${escapeHtml(post.id)}">
@@ -3532,7 +3530,7 @@ els.filterButtons.forEach((button) => {
   button.addEventListener("click", () => setFilter(button.dataset.filter));
 });
 
-els.search.addEventListener("input", (event) => {
+els.search?.addEventListener("input", (event) => {
   state.search = event.target.value;
   renderFeed();
 });
@@ -3617,16 +3615,16 @@ els.listingItems?.addEventListener("input", (event) => {
   clearComposerFieldInvalidState(target);
 });
 
-els.composerText.addEventListener("input", () => {
+els.composerText?.addEventListener("input", () => {
   if (state.composerMode === "listing") showListingHelperMessage();
   updateMentionSuggestions();
 });
-els.composerText.addEventListener("click", updateMentionSuggestions);
-els.composerText.addEventListener("keyup", (event) => {
+els.composerText?.addEventListener("click", updateMentionSuggestions);
+els.composerText?.addEventListener("keyup", (event) => {
   if (["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"].includes(event.key)) return;
   updateMentionSuggestions();
 });
-els.composerText.addEventListener("keydown", (event) => {
+els.composerText?.addEventListener("keydown", (event) => {
   if (!state.mention.active || !state.mention.items.length) return;
 
   if (event.key === "ArrowDown") {
@@ -3683,7 +3681,7 @@ els.composerEmojiPicker?.addEventListener("emoji-click", (event) => {
   insertComposerEmoji(event.detail?.unicode || event.detail?.emoji?.unicode || "");
 });
 
-els.publishPost.addEventListener("click", publishPost);
+els.publishPost?.addEventListener("click", publishPost);
 function handleComposerFileChange() {
   renderComposerFile().catch((error) => {
     console.warn("Não foi possível validar o arquivo selecionado.", error);
@@ -3716,13 +3714,13 @@ els.composer?.addEventListener("drop", (event) => {
     clearComposerFile({ preserveVideoHelper: true });
   });
 });
-els.composerClearFile.addEventListener("click", clearComposerFile);
+els.composerClearFile?.addEventListener("click", clearComposerFile);
 els.cancelListingEdit?.addEventListener("click", cancelListingEdit);
 els.listingDetailModal?.addEventListener("click", (event) => {
   if (event.target === els.listingDetailModal) closeListingDetailModal();
 });
-els.verificationClose.addEventListener("click", closeVerificationModal);
-els.verificationSteps.addEventListener("click", async (event) => {
+els.verificationClose?.addEventListener("click", closeVerificationModal);
+els.verificationSteps?.addEventListener("click", async (event) => {
   const button = event.target instanceof Element
     ? event.target.closest("[data-verification-action]")
     : null;
@@ -3746,7 +3744,7 @@ els.verificationSteps.addEventListener("click", async (event) => {
     setVerificationFeedback(error.message || "Não foi possível continuar a verificação.", "error");
   }
 });
-els.verificationPrimary.addEventListener("click", async () => {
+els.verificationPrimary?.addEventListener("click", async () => {
   try {
     const action = els.verificationPrimary.dataset.action || "connect";
     if (action === "open_invite") {
@@ -4116,7 +4114,7 @@ document.addEventListener("gimerr:video-view", (event) => {
   ));
 });
 
-els.openComposer.addEventListener("click", () => {
+els.openComposer?.addEventListener("click", () => {
   openComposerAndFocus();
 });
 

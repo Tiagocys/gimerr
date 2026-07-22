@@ -58,6 +58,16 @@
     return `./profile?id=${encodeURIComponent(user.id)}`;
   }
 
+  function hasUsableSession() {
+    return Boolean(state.session?.access_token && state.session?.user?.id && !state.navbarPollingPaused);
+  }
+
+  async function syncCurrentSession() {
+    const { data } = await window.GimerrAuth.getSession();
+    state.session = data.session || null;
+    return state.session;
+  }
+
   function setMenuOpen(isOpen) {
     state.open = isOpen;
     accountMenu.classList.toggle("is-open", isOpen);
@@ -216,14 +226,20 @@
   }
 
   async function loadNotifications({ markRead = false } = {}) {
-    if (!state.session?.access_token || state.notificationsLoading) return;
+    if (state.notificationsLoading || state.navbarPollingPaused) return;
+    const session = await syncCurrentSession().catch(() => null);
+    if (!session?.access_token) {
+      handleUnauthorizedPolling();
+      return;
+    }
+
     state.notificationsLoading = true;
     renderNotificationsList();
     try {
       const response = await fetch("/api/notifications?limit=20", {
         headers: {
           accept: "application/json",
-          authorization: `Bearer ${state.session.access_token}`,
+          authorization: `Bearer ${session.access_token}`,
         },
       });
       if (response.status === 401) {
@@ -239,7 +255,7 @@
           method: "POST",
           headers: {
             accept: "application/json",
-            authorization: `Bearer ${state.session.access_token}`,
+            authorization: `Bearer ${session.access_token}`,
             "content-type": "application/json",
           },
           body: JSON.stringify({}),
@@ -294,6 +310,7 @@
     state.messagesLoading = false;
     setMenuOpen(false);
     renderMessagesBadge();
+    ensureCreateListingButton().hidden = true;
     authLink.hidden = false;
     accountMenu.hidden = true;
     ensureMessagesLink().hidden = true;
@@ -301,14 +318,19 @@
   }
 
   async function loadMessagesUnreadCount() {
-    if (!state.session?.access_token || state.messagesLoading) return;
+    if (state.messagesLoading || state.navbarPollingPaused) return;
+    const session = await syncCurrentSession().catch(() => null);
+    if (!session?.access_token) {
+      handleUnauthorizedPolling();
+      return;
+    }
 
     state.messagesLoading = true;
     try {
       const response = await fetch("/api/messages/unread-count", {
         headers: {
           accept: "application/json",
-          authorization: `Bearer ${state.session.access_token}`,
+          authorization: `Bearer ${session.access_token}`,
         },
       });
       if (response.status === 401) {
@@ -328,10 +350,10 @@
   }
 
   function startMessagesPolling() {
-    if (state.navbarPollingPaused) return;
+    if (!hasUsableSession()) return;
     window.clearInterval(state.messagesPollTimer);
     state.messagesPollTimer = window.setInterval(() => {
-      if (!document.hidden) {
+      if (!document.hidden && hasUsableSession()) {
         loadMessagesUnreadCount();
       }
     }, 15000);
@@ -346,17 +368,17 @@
   }
 
   function startNotificationsPolling() {
-    if (state.navbarPollingPaused) return;
+    if (!hasUsableSession()) return;
     window.clearInterval(state.notificationsPollTimer);
     state.notificationsPollTimer = window.setInterval(() => {
-      if (!document.hidden) {
+      if (!document.hidden && hasUsableSession()) {
         loadNotifications();
       }
     }, 60000);
   }
 
   window.addEventListener("gimerr:messages-read", () => {
-    loadMessagesUnreadCount();
+    if (hasUsableSession()) loadMessagesUnreadCount();
   });
 
   window.addEventListener("gimerr:messages-page-stale", () => {
@@ -364,7 +386,7 @@
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && !state.navbarPollingPaused) {
+    if (!document.hidden && hasUsableSession()) {
       loadMessagesUnreadCount();
       loadNotifications();
     }
@@ -427,6 +449,7 @@
       ensureTopbarActionLoader();
       const client = await window.GimerrAuth.getClient();
       const { data } = await window.GimerrAuth.getSession();
+      if (window.GimerrAuth.isAuthRedirecting?.()) return;
       state.session = data.session;
 
       if (!state.session?.user) {

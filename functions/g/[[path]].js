@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+const GAME_HTML = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
@@ -110,4 +110,28 @@
   <script type="module" src="/vendor/emoji-picker-element/index.js"></script>
   <script src="/game.js?v=20260722-follow-guest-signin" defer></script>
 </body>
-</html>
+</html>`;
+
+async function getGameHtml(request, env) {
+  if (!env?.ASSETS?.fetch) return GAME_HTML;
+
+  const assetUrl = new URL(request.url);
+  assetUrl.pathname = "/game";
+  assetUrl.search = "";
+
+  const response = await env.ASSETS.fetch(new Request(assetUrl, request));
+  if (!response.ok) return GAME_HTML;
+
+  const html = await response.text();
+  return html.trim() || GAME_HTML;
+}
+
+export async function onRequestGet({ request, env }) {
+  const html = await getGameHtml(request, env);
+  return new Response(html, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
+}

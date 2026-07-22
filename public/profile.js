@@ -137,7 +137,7 @@ function getProfileUrl(profile) {
 function getGameUrl(game) {
   if (!game) return "./game";
   return game.slug
-    ? `./game?slug=${encodeURIComponent(game.slug)}`
+    ? `/g/${encodeURIComponent(game.slug)}`
     : `./game?id=${encodeURIComponent(game.id || game.igdbId || "")}`;
 }
 
@@ -716,17 +716,19 @@ function renderPublicInfo() {
   `;
 }
 
-function renderPostMenu(post) {
+function renderPostMenu(post, options = {}) {
   const postId = escapeHtml(post.id);
   const ownerId = post.author?.id || post.profileId || post.profile_id || "";
   const isOwner = state.session?.user?.id && String(ownerId) === String(state.session.user.id);
   const isListing = post.type === "listing";
+  const inListingDetail = Boolean(options.inListingDetail);
   return `
     <div class="post-menu" data-post-menu>
       <button class="ghost-icon post-menu-button" type="button" data-post-menu-toggle data-post-id="${postId}" aria-label="Abrir menu do post" aria-expanded="false">
         <span aria-hidden="true">&#8942;</span>
       </button>
       <div class="post-menu-popover" hidden>
+        ${isListing && !inListingDetail ? `<button type="button" data-post-share data-post-id="${postId}">Compartilhar</button>` : ""}
         ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
         ${isOwner && isListing ? `<a href="./?editListing=${encodeURIComponent(post.id)}">Editar</a>` : ""}
         ${isOwner && !isListing ? `<button type="button" data-post-edit data-post-id="${postId}">Editar</button>` : ""}
@@ -1150,7 +1152,7 @@ function renderListingDetail(post, sellerDetails = null) {
       <div class="listing-detail-actions">
         <button class="ghost-icon listing-detail-close" type="button" data-listing-close aria-label="Voltar">x</button>
         <button class="post-action-button" type="button" data-post-share data-post-id="${escapeHtml(post.id)}">Compartilhar</button>
-        ${renderPostMenu(post)}
+        ${renderPostMenu(post, { inListingDetail: true })}
       </div>
       <section class="listing-detail-main">
         <div>
@@ -1406,9 +1408,7 @@ function renderCommentTools() {
 
 function renderInlineCommentReplyForm(postId, comment) {
   if (String(state.replyingToCommentId) !== String(comment.id)) return "";
-  if (!state.session?.access_token) {
-    return `<a class="text-button inline-comment-login" href="./sign-in.html">Entre para responder</a>`;
-  }
+  if (!state.session?.user?.id || !state.session?.access_token) return "";
   const isSubmitting = String(state.commentSubmittingPostId) === String(comment.id);
   return `
     <form class="inline-comment-form inline-reply-form" data-inline-comment-form data-post-id="${escapeHtml(postId)}" data-parent-comment-id="${escapeHtml(comment.id)}">
@@ -1430,6 +1430,7 @@ function renderInlineCommentItem(comment, postId, commentsById) {
   const author = comment.author || {};
   const authorName = author.displayName || "Usuário Gimerr";
   const authorHandle = author.username ? `@${author.username}` : "";
+  const isAuthenticated = Boolean(state.session?.user?.id && state.session?.access_token);
   const canDelete = state.session?.user?.id && String(author.id) === String(state.session.user.id);
   return `
     <div class="comment-thread">
@@ -1446,7 +1447,7 @@ function renderInlineCommentItem(comment, postId, commentsById) {
           ${comment.body ? `<p>${renderTextWithMentions(comment.body, author.username)}</p>` : ""}
           ${renderCommentMedia(comment)}
           <div class="comment-actions">
-            <button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>
+            ${isAuthenticated ? `<button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>` : ""}
             ${canDelete ? `
               <button class="comment-delete-button" type="button" data-comment-delete data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}" aria-label="Apagar comentário" title="Apagar comentário">
                 <img src="./assets/trash.svg" alt="">
@@ -1524,9 +1525,7 @@ async function loadInlineComments(postId, { append = false } = {}) {
 
 function renderInlineCommentForm(post) {
   if (String(state.activeCommentPostId) !== String(post.id)) return "";
-  if (!state.session?.access_token) {
-    return `<a class="text-button inline-comment-login" href="./sign-in.html">Entre para comentar</a>`;
-  }
+  if (!state.session?.user?.id || !state.session?.access_token) return "";
   const isSubmitting = String(state.commentSubmittingPostId) === String(post.id);
   return `
     <form class="inline-comment-form" data-inline-comment-form data-post-id="${escapeHtml(post.id)}">
@@ -1893,7 +1892,7 @@ function renderFeed({ prepareVideos = true } = {}) {
     const bodyText = isListing ? getListingPreviewText(listingData) : post.body;
     const media = renderPostMedia(post);
     const gameUrl = post.gameSlug
-      ? `./game?slug=${encodeURIComponent(post.gameSlug)}`
+      ? `/g/${encodeURIComponent(post.gameSlug)}`
       : `./game?id=${encodeURIComponent(post.gameId)}`;
     const authorName = profileInfo.displayName || profileInfo.username || "Usuário Gimerr";
     const cardHtml = `

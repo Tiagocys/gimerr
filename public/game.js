@@ -96,7 +96,7 @@
     const postId = params.get("post");
     if (!postId) return false;
 
-    const url = new URL("./post", window.location.origin);
+    const url = new URL("/post", window.location.origin);
     url.searchParams.set("id", postId);
     window.location.replace(url.toString());
     return true;
@@ -127,24 +127,31 @@
     const slug = params.get("slug")?.trim();
     if (id) return { key: "id", value: String(id) };
     if (slug) return { key: "slug", value: slug };
+    const pathSlug = window.location.pathname.match(/^\/g\/([^/?#]+)/)?.[1];
+    if (pathSlug) return { key: "slug", value: decodeURIComponent(pathSlug).trim() };
     return null;
   }
 
   function getProfileUrl(profile) {
-    if (profile?.username) return `./profile?u=${encodeURIComponent(profile.username)}`;
-    return `./profile?id=${encodeURIComponent(profile.id)}`;
+    if (profile?.username) return `/profile?u=${encodeURIComponent(profile.username)}`;
+    return `/profile?id=${encodeURIComponent(profile.id)}`;
   }
 
   function getCurrentGameUrl() {
-    if (state.game?.slug) return `./game?slug=${encodeURIComponent(state.game.slug)}`;
-    return `./game?id=${encodeURIComponent(state.game?.igdbId || "")}`;
+    if (state.game?.slug) return `/g/${encodeURIComponent(state.game.slug)}`;
+    return `/game?id=${encodeURIComponent(state.game?.igdbId || "")}`;
   }
 
   function getGameUrl(game) {
     if (!game) return getCurrentGameUrl();
     return game.slug
-      ? `./game?slug=${encodeURIComponent(game.slug)}`
-      : `./game?id=${encodeURIComponent(game.id || game.igdbId || state.game?.igdbId || "")}`;
+      ? `/g/${encodeURIComponent(game.slug)}`
+      : `/game?id=${encodeURIComponent(game.id || game.igdbId || state.game?.igdbId || "")}`;
+  }
+
+  function normalizeGamePath() {
+    if (!state.game?.slug || window.location.pathname === `/g/${state.game.slug}`) return;
+    window.history.replaceState({}, document.title, `/g/${encodeURIComponent(state.game.slug)}`);
   }
 
   function normalizeFollowedProfile(profile) {
@@ -153,7 +160,7 @@
       id: profile.id,
       displayName: profile.display_name || profile.username,
       username: profile.username,
-      avatarUrl: profile.avatar_url || "./assets/avatar.svg",
+      avatarUrl: profile.avatar_url || "/assets/avatar.svg",
     };
   }
 
@@ -177,7 +184,7 @@
     const mentions = extractMentionUsernames(post?.body || post?.text, post?.author?.username);
     if (!mentions.length) return "";
     const links = mentions.map((username) => (
-      `<a href="./profile?u=${encodeURIComponent(username)}">@${escapeHtml(username)}</a>`
+      `<a href="/profile?u=${encodeURIComponent(username)}">@${escapeHtml(username)}</a>`
     )).join(", ");
     return `<p class="post-mention-line"><strong>${escapeHtml(authorName)}</strong> está com ${links}</p>`;
   }
@@ -196,7 +203,7 @@
       const atIndex = match.index + match[1].length;
       output += escapeHtml(value.slice(lastIndex, atIndex));
       if (key && key !== author) {
-        output += `<a class="inline-mention" href="./profile?u=${encodeURIComponent(username)}">@${escapeHtml(username)}</a>`;
+        output += `<a class="inline-mention" href="/profile?u=${encodeURIComponent(username)}">@${escapeHtml(username)}</a>`;
       } else {
         output += escapeHtml(`@${username}`);
       }
@@ -533,7 +540,7 @@
     container.innerHTML = state.commentMention.items.map((profile, index) => `
       <button class="composer-mention-option${index === state.commentMention.selectedIndex ? " is-active" : ""}" type="button" data-comment-mention-index="${index}">
         <span class="user-search-avatar">
-          <img src="${escapeHtml(profile.avatarUrl || "./assets/avatar.svg")}" alt="">
+          <img src="${escapeHtml(profile.avatarUrl || "/assets/avatar.svg")}" alt="">
         </span>
         <span class="composer-mention-copy">
           <strong>${escapeHtml(profile.displayName)}</strong>
@@ -610,19 +617,21 @@
     }).format(date);
   }
 
-  function renderPostMenu(post) {
+  function renderPostMenu(post, options = {}) {
     const postId = escapeHtml(post.id);
     const ownerId = post.author?.id || post.profileId || post.profile_id || "";
     const isOwner = state.session?.user?.id && String(ownerId) === String(state.session.user.id);
     const isListing = post.type === "listing";
+    const inListingDetail = Boolean(options.inListingDetail);
     return `
       <div class="post-menu" data-post-menu>
         <button class="ghost-icon post-menu-button" type="button" data-post-menu-toggle data-post-id="${postId}" aria-label="Abrir menu do post" aria-expanded="false">
           <span aria-hidden="true">&#8942;</span>
       </button>
       <div class="post-menu-popover" hidden>
+          ${isListing && !inListingDetail ? `<button type="button" data-post-share data-post-id="${postId}">Compartilhar</button>` : ""}
           ${!isOwner ? `<button type="button" data-post-report data-post-id="${postId}">Denunciar</button>` : ""}
-          ${isOwner && isListing ? `<a href="./?editListing=${encodeURIComponent(post.id)}">Editar</a>` : ""}
+          ${isOwner && isListing ? `<a href="/?editListing=${encodeURIComponent(post.id)}">Editar</a>` : ""}
           ${isOwner && !isListing ? `<button type="button" data-post-edit data-post-id="${postId}">Editar</button>` : ""}
           ${isOwner ? `<button class="danger" type="button" data-post-delete data-post-id="${postId}">Excluir</button>` : ""}
         </div>
@@ -652,7 +661,7 @@
 
   async function reportPost(postId) {
     if (!state.session?.access_token) {
-      window.location.assign("./sign-in.html");
+      window.location.assign("/sign-in.html");
       return;
     }
 
@@ -663,7 +672,7 @@
   }
 
   function getPostShareUrl(postId) {
-    const url = new URL("./post", window.location.origin);
+    const url = new URL("/post", window.location.origin);
     url.searchParams.set("id", postId);
     return url.toString();
   }
@@ -815,7 +824,7 @@
     const overlays = `
       <span class="listing-preview-views" data-listing-view-count data-post-id="${postId}">${escapeHtml(formatListingViewBadge(post.listingViewCount))}</span>
       <button class="listing-preview-share" type="button" data-post-share data-post-id="${postId}" aria-label="Compartilhar anúncio">
-        <img src="./assets/share-2.svg" alt="" aria-hidden="true">
+        <img src="/assets/share-2.svg" alt="" aria-hidden="true">
       </button>
     `;
     if (!firstImage?.url) {
@@ -889,8 +898,8 @@
 
   function getPlatformMeta(platform) {
     const id = String(platform || "").trim().toLowerCase();
-    if (id === "discord") return { id, label: "Discord", icon: "./assets/discord.svg" };
-    if (id === "twitch") return { id, label: "Twitch", icon: "./assets/twitch.svg" };
+    if (id === "discord") return { id, label: "Discord", icon: "/assets/discord.svg" };
+    if (id === "twitch") return { id, label: "Twitch", icon: "/assets/twitch.svg" };
     return { id: id || "platform", label: platform || "Plataforma", icon: "" };
   }
 
@@ -905,7 +914,7 @@
         if (whatsappUrl) {
           contactItems.push(`
             <a class="info-pill contact-pill whatsapp-contact-pill" href="${escapeHtml(whatsappUrl)}" target="_blank" rel="noopener">
-              <img src="./assets/whatsapp.svg" alt="">
+              <img src="/assets/whatsapp.svg" alt="">
               WhatsApp
             </a>
           `);
@@ -916,7 +925,7 @@
         if (phoneDigits) {
           contactItems.push(`
             <a class="info-pill contact-pill telegram-contact-button" href="tg://resolve?phone=${escapeHtml(phoneDigits)}">
-              <img src="./assets/telegram.svg" alt="">
+              <img src="/assets/telegram.svg" alt="">
               Telegram
             </a>
           `);
@@ -953,7 +962,7 @@
       id: state.game?.igdbId || state.game?.id || "",
       slug: state.game?.slug || "",
       name: state.game?.name || "Game",
-      coverUrl: state.game?.coverUrl || "./assets/avatar.svg",
+      coverUrl: state.game?.coverUrl || "/assets/avatar.svg",
     };
   }
 
@@ -1010,7 +1019,7 @@
     list.innerHTML = users.length ? users.map((user) => `
       <a class="people-row" href="${getProfileUrl({ id: user.id, username: user.username })}">
         <div class="post-avatar">
-          <img src="${escapeHtml(user.avatar_url || "./assets/avatar.svg")}" alt="">
+          <img src="${escapeHtml(user.avatar_url || "/assets/avatar.svg")}" alt="">
         </div>
         <div>
           <strong>${escapeHtml(user.display_name || user.username || "Usuário Gimerr")}</strong>
@@ -1030,7 +1039,7 @@
     const stats = sellerDetails?.stats || {};
     const sellerName = sellerProfile.display_name || author.displayName || author.username || "Vendedor Gimerr";
     const sellerUsername = sellerProfile.username || author.username || "";
-    const sellerAvatar = sellerProfile.avatar_url || author.avatarUrl || "./assets/avatar.svg";
+    const sellerAvatar = sellerProfile.avatar_url || author.avatarUrl || "/assets/avatar.svg";
     const canMessageSeller = author.id && author.id !== state.session?.user?.id;
     const mediaItems = getPostMediaItems(post);
     const listingVideo = mediaItems.find((item) => String(item?.mediaType || "").startsWith("video/"));
@@ -1070,13 +1079,13 @@
         <div class="listing-detail-actions">
           <button class="ghost-icon listing-detail-close" type="button" data-listing-close aria-label="Voltar">x</button>
           <button class="post-action-button" type="button" data-post-share data-post-id="${escapeHtml(post.id)}">Compartilhar</button>
-          ${renderPostMenu(post)}
+          ${renderPostMenu(post, { inListingDetail: true })}
         </div>
         <section class="listing-detail-main">
           <div>
             <a class="channel-line" href="${getGameUrl(game)}">
               <span class="channel-game-logo" aria-hidden="true">
-                <img src="${escapeHtml(game?.coverUrl || "./assets/avatar.svg")}" alt="">
+                <img src="${escapeHtml(game?.coverUrl || "/assets/avatar.svg")}" alt="">
               </span>
               <span>Em ${escapeHtml(game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
             </a>
@@ -1100,8 +1109,8 @@
             ${renderListingRecommendationsControl(sellerDetails, stats, author.id)}
           </div>
           ${canMessageSeller ? `
-            <a class="primary-button listing-message-button message-action-button" href="./messages?listingPostId=${encodeURIComponent(post.id)}">
-              <img src="./assets/message.svg" alt="" aria-hidden="true">
+            <a class="primary-button listing-message-button message-action-button" href="/messages?listingPostId=${encodeURIComponent(post.id)}">
+              <img src="/assets/message.svg" alt="" aria-hidden="true">
               <span>Enviar mensagem</span>
             </a>
           ` : ""}
@@ -1235,7 +1244,7 @@
     if (!els.listingDetailModal || !els.listingDetailContent) return;
     if (feedPost && feedPost.type !== "listing") return;
     if (!state.session?.user) {
-      window.location.assign("./sign-in.html");
+      window.location.assign("/sign-in.html");
       return;
     }
     els.listingDetailModal.hidden = false;
@@ -1281,7 +1290,7 @@
       `data-image-alt="${escapeHtml(alt)}"`,
       `data-image-author-name="${escapeHtml(author.displayName || author.username || "Usuário Gimerr")}"`,
       `data-image-author-username="${escapeHtml(author.username || "")}"`,
-      `data-image-author-avatar="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}"`,
+      `data-image-author-avatar="${escapeHtml(author.avatarUrl || "/assets/avatar.svg")}"`,
       `data-image-body="${escapeHtml(post.body || post.text || "")}"`,
       `data-image-post-id="${escapeHtml(post.id || "")}"`,
     ].join(" ");
@@ -1385,10 +1394,10 @@
       <div class="comment-emoji-picker" data-comment-emoji-picker hidden></div>
       <div class="comment-form-tools">
         <label class="comment-tool-button" title="Adicionar imagem">
-          <img src="./assets/camera.svg.svg" alt="" aria-hidden="true">
+          <img src="/assets/camera.svg" alt="" aria-hidden="true">
           <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" data-comment-image>
         </label>
-        <button class="comment-tool-button" type="button" data-comment-emoji aria-label="Abrir emojis"><img src="./assets/emoji.svg.svg" alt="" aria-hidden="true"></button>
+        <button class="comment-tool-button" type="button" data-comment-emoji aria-label="Abrir emojis"><img src="/assets/emoji.svg" alt="" aria-hidden="true"></button>
       </div>
       <div class="comment-image-preview" data-comment-image-preview hidden></div>
     `;
@@ -1396,9 +1405,7 @@
 
   function renderInlineCommentReplyForm(postId, comment) {
     if (String(state.replyingToCommentId) !== String(comment.id)) return "";
-    if (!state.session?.access_token) {
-      return `<a class="text-button inline-comment-login" href="./sign-in.html">Entre para responder</a>`;
-    }
+    if (!state.session?.user?.id || !state.session?.access_token) return "";
     const isSubmitting = String(state.commentSubmittingPostId) === String(comment.id);
     return `
       <form class="inline-comment-form inline-reply-form" data-inline-comment-form data-post-id="${escapeHtml(postId)}" data-parent-comment-id="${escapeHtml(comment.id)}">
@@ -1420,12 +1427,13 @@
     const author = comment.author || {};
     const authorName = author.displayName || "Usuário Gimerr";
     const authorHandle = author.username ? `@${author.username}` : "";
+    const isAuthenticated = Boolean(state.session?.user?.id && state.session?.access_token);
     const canDelete = state.session?.user?.id && String(author.id) === String(state.session.user.id);
     return `
       <div class="comment-thread">
         <article class="comment-item inline-comment-item" id="comment-${escapeHtml(comment.id)}">
           <a class="post-avatar" href="${getProfileUrl(author)}">
-            <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
+            <img src="${escapeHtml(author.avatarUrl || "/assets/avatar.svg")}" alt="">
           </a>
           <div class="comment-copy">
             <div class="comment-meta">
@@ -1436,10 +1444,10 @@
             ${comment.body ? `<p>${renderTextWithMentions(comment.body, author.username)}</p>` : ""}
             ${renderCommentMedia(comment)}
             <div class="comment-actions">
-              <button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>
+              ${isAuthenticated ? `<button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>` : ""}
               ${canDelete ? `
                 <button class="comment-delete-button" type="button" data-comment-delete data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}" aria-label="Apagar comentário" title="Apagar comentário">
-                  <img src="./assets/trash.svg" alt="">
+                  <img src="/assets/trash.svg" alt="">
                 </button>
               ` : ""}
             </div>
@@ -1466,7 +1474,7 @@
         : `<p class="comments-empty">${
           isLoading
             ? "Carregando comentários..."
-            : `Nenhum comentário ainda.${state.session?.user ? "" : ` <a class="comments-login-link" href="./sign-in.html">Entre para comentar</a>.`}`
+            : `Nenhum comentário ainda.${state.session?.user ? "" : ` <a class="comments-login-link" href="/sign-in.html">Entre para comentar</a>.`}`
         }</p>`;
     const moreButton = commentState.hasMore
       ? `<button class="text-button inline-comments-more" type="button" data-post-comments-more data-post-id="${escapeHtml(postId)}" ${isLoading ? "disabled" : ""}>${isLoading ? "Carregando..." : "Ver mais comentários"}</button>`
@@ -1514,9 +1522,7 @@
 
   function renderInlineCommentForm(post) {
     if (String(state.activeCommentPostId) !== String(post.id)) return "";
-    if (!state.session?.access_token) {
-      return `<a class="text-button inline-comment-login" href="./sign-in.html">Entre para comentar</a>`;
-    }
+    if (!state.session?.user?.id || !state.session?.access_token) return "";
     const isSubmitting = String(state.commentSubmittingPostId) === String(post.id);
     return `
       <form class="inline-comment-form" data-inline-comment-form data-post-id="${escapeHtml(post.id)}">
@@ -2025,7 +2031,7 @@
 
   async function publishGamePost() {
     if (!state.session?.user) {
-      window.location.assign("./sign-in.html");
+      window.location.assign("/sign-in.html");
       return;
     }
     if (!state.game) return;
@@ -2226,7 +2232,7 @@
     document.title = `${game.name} | Gimerr`;
     els.title.textContent = game.name;
     els.description.textContent = game.summary || "Este jogo ainda não tem descrição cadastrada.";
-    els.logo.innerHTML = `<img src="${escapeHtml(game.coverUrl || "./assets/avatar.svg")}" alt="">`;
+    els.logo.innerHTML = `<img src="${escapeHtml(game.coverUrl || "/assets/avatar.svg")}" alt="">`;
 
     const genres = getTaxonomyNames(game.genres, 5);
     const platforms = getTaxonomyNames(game.platforms, 8);
@@ -2250,12 +2256,9 @@
     if (state.loading) return;
     els.followersCount.textContent = formatCount(state.followerCount);
     els.followersSideCount.textContent = formatCount(state.followerCount);
-    els.followButton.disabled = !state.session?.user || !state.game;
+    els.followButton.disabled = !state.game;
     els.followButton.textContent = state.following ? "Seguindo" : "Seguir";
     els.followButton.classList.toggle("is-secondary-state", state.following);
-    if (!state.session?.user) {
-      els.followButton.textContent = "Entre para seguir";
-    }
     setPublishing(false);
   }
 
@@ -2269,7 +2272,7 @@
     els.followersList.innerHTML = state.followers.map((follower) => `
       <a class="people-row" href="${getProfileUrl(follower)}">
         <div class="post-avatar">
-          <img src="${escapeHtml(follower.avatarUrl || "./assets/avatar.svg")}" alt="">
+          <img src="${escapeHtml(follower.avatarUrl || "/assets/avatar.svg")}" alt="">
         </div>
         <div>
           <strong>${escapeHtml(follower.displayName)}</strong>
@@ -2355,7 +2358,7 @@
               <div class="post-meta">
                 <a class="author-block" href="${getProfileUrl(author)}">
                   <div class="post-avatar">
-                    <img src="${escapeHtml(author.avatarUrl || "./assets/avatar.svg")}" alt="">
+                    <img src="${escapeHtml(author.avatarUrl || "/assets/avatar.svg")}" alt="">
                   </div>
                   <div class="author-copy">
                     <strong>${escapeHtml(authorName)}</strong>
@@ -2371,7 +2374,7 @@
               </div>
               <a class="channel-line" href="${getCurrentGameUrl()}">
                 <span class="channel-game-logo" aria-hidden="true">
-                  <img src="${escapeHtml(state.game?.coverUrl || "./assets/avatar.svg")}" alt="">
+                  <img src="${escapeHtml(state.game?.coverUrl || "/assets/avatar.svg")}" alt="">
                 </span>
                 <span>Em ${escapeHtml(state.game?.name || "Game")} ${escapeHtml(formatRelativeTime(post.createdAt))}</span>
               </a>
@@ -2393,7 +2396,7 @@
           </div>
           <a class="channel-line" href="${getCurrentGameUrl()}">
             <span class="channel-game-logo" aria-hidden="true">
-              <img src="${escapeHtml(state.game?.coverUrl || "./assets/avatar.svg")}" alt="">
+              <img src="${escapeHtml(state.game?.coverUrl || "/assets/avatar.svg")}" alt="">
             </span>
             <span>Em ${escapeHtml(state.game?.name || "Game")}</span>
           </a>
@@ -2431,6 +2434,7 @@
     }
 
     state.game = payload.game;
+    normalizeGamePath();
     state.followers = payload.followers || [];
     state.followerCount = Number(payload.followerCount || 0);
     state.following = Boolean(payload.isFollowing);
@@ -2484,7 +2488,7 @@
 
   async function toggleFollow() {
     if (!state.session?.user) {
-      window.location.assign("./sign-in.html");
+      window.location.assign("/sign-in.html");
       return;
     }
     if (!state.game) return;

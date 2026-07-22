@@ -5779,13 +5779,6 @@ button.listing-detail-item-media:focus-visible {
   align-items: flex-start;
 }
 
-.share-modal .modal-head p {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
 .report-modal {
   display: grid;
   gap: 14px;
@@ -6034,6 +6027,125 @@ button.listing-detail-item-media:focus-visible {
   border-color: #bbf7d0;
   background: #ecfdf5;
   color: #166534;
+}
+
+.share-suggestions {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.share-suggestions[hidden] {
+  display: none;
+}
+
+.share-suggestions-head {
+  display: grid;
+  gap: 2px;
+}
+
+.share-suggestions-head strong {
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.share-suggestions-head span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.share-suggestion-list {
+  display: grid;
+  gap: 8px;
+}
+
+.share-suggestion-item {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+
+.share-suggestion-avatar {
+  display: block;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f1f5f9;
+}
+
+.share-suggestion-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.share-suggestion-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.share-suggestion-copy strong,
+.share-suggestion-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-suggestion-copy strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.share-suggestion-copy small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.share-suggestion-send {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 9px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.share-suggestion-send:disabled {
+  cursor: default;
+  border-color: #bbf7d0;
+  background: #ecfdf5;
+  color: #166534;
+}
+
+.share-suggestion-loader {
+  display: grid;
+  gap: 8px;
+}
+
+.share-suggestion-loader span {
+  display: block;
+  height: 54px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #e5e7eb 25%, #f8fafc 37%, #e5e7eb 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
 }
 
 .share-feedback {

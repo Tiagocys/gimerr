@@ -4,6 +4,7 @@
   let sessionPromise = null;
   let authCodeHandled = false;
   let authCodeExchangePromise = null;
+  let authRedirecting = false;
   const AUTH_RETURN_TO_KEY = "gimerr-auth-return-to";
 
   async function loadAuthConfig() {
@@ -76,6 +77,7 @@
     if (returnPath === "/") return false;
     const currentPath = `${global.location.pathname}${global.location.search}${global.location.hash}`;
     if (currentPath === returnPath) return false;
+    authRedirecting = true;
     global.location.replace(getAuthRedirectUrl(returnPath));
     return true;
   }
@@ -129,6 +131,48 @@
     }
   }
 
+  async function clearInvalidLocalSession(client) {
+    try {
+      await client.auth.signOut({ scope: "local" });
+    } catch {
+      try {
+        await client.auth.signOut();
+      } catch {
+        // Ignore cleanup failures; callers will still receive a null session.
+      }
+    }
+  }
+
+  async function getValidatedSession(client) {
+    const { data, error } = await client.auth.getSession();
+    if (error || !data?.session?.access_token || !data.session.user?.id) {
+      if (data?.session?.access_token) await clearInvalidLocalSession(client);
+      return { data: { session: null }, error: null };
+    }
+
+    const validationResponse = await fetch("/api/auth-session", {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${data.session.access_token}`,
+      },
+    });
+    const validation = await validationResponse.json().catch(() => ({}));
+    if (!validationResponse.ok || !validation.authenticated || !validation.user?.id) {
+      await clearInvalidLocalSession(client);
+      return { data: { session: null }, error: null };
+    }
+
+    return {
+      data: {
+        session: {
+          ...data.session,
+          user: validation.user,
+        },
+      },
+      error: null,
+    };
+  }
+
   async function getSession() {
     if (sessionPromise) return sessionPromise;
 
@@ -140,7 +184,11 @@
       await recoverHashSession(client);
       await exchangeAuthCode(client, code);
 
-      return client.auth.getSession();
+      if (authRedirecting) {
+        return { data: { session: null }, error: null, redirecting: true };
+      }
+
+      return getValidatedSession(client);
     })().catch((error) => {
       sessionPromise = null;
       throw error;
@@ -153,5 +201,6 @@
     getClient,
     getAuthRedirectUrl,
     getSession,
+    isAuthRedirecting: () => authRedirecting,
   };
 })(window);

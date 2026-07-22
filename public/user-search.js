@@ -90,7 +90,8 @@
   }
 
   function getGameUrl(game) {
-    return `./game.html?id=${encodeURIComponent(game.igdbId)}`;
+    if (game?.slug) return `/g/${encodeURIComponent(game.slug)}`;
+    return `./game?id=${encodeURIComponent(game.igdbId)}`;
   }
 
   function getGameSubmitLabel(term) {

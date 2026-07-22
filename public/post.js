@@ -286,7 +286,7 @@
   function getGameUrl(game) {
     if (!game) return "./game";
     return game.slug
-      ? `./game?slug=${encodeURIComponent(game.slug)}`
+      ? `/g/${encodeURIComponent(game.slug)}`
       : `./game?id=${encodeURIComponent(game.id)}`;
   }
 

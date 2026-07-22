@@ -7,6 +7,7 @@
     username: null,
     body: null,
     commentsList: null,
+    commentsHead: null,
     commentsStatus: null,
     commentsFormSlot: null,
     commentsMoreButton: null,
@@ -130,6 +131,7 @@
     state.name = backdrop.querySelector(".media-lightbox-name");
     state.username = backdrop.querySelector(".media-lightbox-username");
     state.body = backdrop.querySelector(".media-lightbox-body");
+    state.commentsHead = backdrop.querySelector(".media-lightbox-comments-head");
     state.commentsList = backdrop.querySelector(".media-lightbox-comments-list");
     state.commentsStatus = backdrop.querySelector(".media-lightbox-comments-status");
     state.commentsFormSlot = backdrop.querySelector(".media-lightbox-comment-form-slot");
@@ -263,6 +265,9 @@
 
   function renderCommentsArea() {
     if (!state.commentsList || !state.commentsStatus || !state.commentsFormSlot || !state.commentsMoreButton) return;
+    if (state.commentsHead) {
+      state.commentsHead.hidden = !(state.commentsLoaded && state.comments.length > 0);
+    }
     state.commentsFormSlot.innerHTML = state.commentsLoaded ? renderCommentForm() : "";
 
     if (!state.commentsLoaded) {

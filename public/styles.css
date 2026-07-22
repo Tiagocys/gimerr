@@ -5487,7 +5487,10 @@ button.listing-detail-item-media:focus-visible {
   gap: 8px;
 }
 
-.listing-seller-stats span {
+.listing-seller-stats span,
+.listing-seller-stat-button {
+  display: block;
+  width: 100%;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -5496,6 +5499,17 @@ button.listing-detail-item-media:focus-visible {
   font-size: 0.82rem;
   font-weight: 900;
   text-align: center;
+}
+
+.listing-seller-stat-button {
+  cursor: pointer;
+}
+
+.listing-seller-stat-button:hover,
+.listing-seller-stat-button:focus-visible {
+  border-color: #58aaff;
+  color: #02132b;
+  outline: 0;
 }
 
 .listing-seller-contact {
@@ -6700,6 +6714,17 @@ button.listing-detail-item-media:focus-visible {
   gap: 8px;
 }
 
+.discord-bot-discord-login {
+  gap: 8px;
+  min-width: 190px;
+  padding: 0 16px;
+  text-decoration: none;
+}
+
+.discord-bot-discord-login img {
+  flex: 0 0 auto;
+}
+
 .discord-bot-install img {
   filter: brightness(0) invert(1);
 }
@@ -7878,6 +7903,25 @@ button.listing-detail-item-media:focus-visible {
     width: 100%;
   }
 
+  .post-meta {
+    position: relative;
+    padding-right: 42px;
+  }
+
+  .post-meta > .post-card-tools {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 8;
+    width: auto;
+    justify-content: flex-end;
+  }
+
+  .post-meta > .post-card-tools .post-menu-popover {
+    right: 0;
+    left: auto;
+  }
+
   .comment-item {
     grid-template-columns: 34px minmax(0, 1fr);
   }
@@ -8255,11 +8299,13 @@ select:focus,
     grid-template-columns: 1fr;
   }
 
-  .discord-bot-actions {
+  .discord-bot-actions,
+  .discord-bot-card-actions {
     align-items: stretch;
   }
 
-  .discord-bot-actions > * {
+  .discord-bot-actions > *,
+  .discord-bot-card-actions > * {
     justify-content: center;
     width: 100%;
   }

@@ -33,6 +33,25 @@ function getRequestedProvider() {
   return providerConfig[provider] ? provider : "";
 }
 
+function getReturnPath() {
+  const params = new URLSearchParams(window.location.search);
+  const value = String(params.get("returnTo") || "").trim();
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) return "/";
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
+function getStoredReturnPath() {
+  const value = sessionStorage.getItem("gimerr-auth-return-to") || "/";
+  if (!value.startsWith("/") || value.startsWith("//")) return "/";
+  return value;
+}
+
 function setLoading(button, label) {
   button.dataset.originalLabel = button.textContent;
   button.textContent = label;
@@ -55,6 +74,7 @@ async function signInWithProvider(provider, button) {
 
   try {
     const client = await window.GimerrAuth.getClient();
+    sessionStorage.setItem("gimerr-auth-return-to", getReturnPath());
     const { error } = await client.auth.signInWithOAuth({
       provider,
       options: {
@@ -74,7 +94,9 @@ async function redirectAuthenticatedUser() {
   try {
     const { data } = await window.GimerrAuth.getSession();
     if (data.session) {
-      window.location.assign(window.GimerrAuth.getAuthRedirectUrl());
+      const returnPath = getStoredReturnPath();
+      sessionStorage.removeItem("gimerr-auth-return-to");
+      window.location.assign(window.GimerrAuth.getAuthRedirectUrl(returnPath));
       return true;
     }
   } catch (error) {

@@ -4,6 +4,7 @@
   let sessionPromise = null;
   let authCodeHandled = false;
   let authCodeExchangePromise = null;
+  const AUTH_RETURN_TO_KEY = "gimerr-auth-return-to";
 
   async function loadAuthConfig() {
     const response = await fetch("/api/auth-config", {
@@ -48,8 +49,35 @@
     return supabaseClientPromise;
   }
 
-  function getAuthRedirectUrl() {
-    return `${global.location.origin}/`;
+  function getAuthRedirectUrl(path = "/") {
+    const rawPath = String(path || "/").trim();
+    const normalizedPath = rawPath.startsWith("/") && !rawPath.startsWith("//")
+      ? rawPath
+      : "/";
+    return `${global.location.origin}${normalizedPath}`;
+  }
+
+  function getStoredReturnPath() {
+    const value = global.sessionStorage?.getItem(AUTH_RETURN_TO_KEY) || "";
+    if (!value || !value.startsWith("/") || value.startsWith("//")) return "";
+    try {
+      const url = new URL(value, global.location.origin);
+      if (url.origin !== global.location.origin) return "";
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      return "";
+    }
+  }
+
+  function consumeAuthReturnRedirect() {
+    const returnPath = getStoredReturnPath();
+    if (!returnPath) return false;
+    global.sessionStorage?.removeItem(AUTH_RETURN_TO_KEY);
+    if (returnPath === "/") return false;
+    const currentPath = `${global.location.pathname}${global.location.search}${global.location.hash}`;
+    if (currentPath === returnPath) return false;
+    global.location.replace(getAuthRedirectUrl(returnPath));
+    return true;
   }
 
   function cleanAuthUrl() {
@@ -89,6 +117,7 @@
         .then(({ error }) => {
           if (error) throw error;
           cleanAuthUrl();
+          consumeAuthReturnRedirect();
         })
         .finally(() => {
           authCodeExchangePromise = null;

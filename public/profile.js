@@ -419,7 +419,9 @@ function applyProfile(profile, links = []) {
     els.avatar.innerHTML = `<img src="./assets/avatar.svg" alt="">`;
   }
 
-  els.feedSubtitle.textContent = `Conteúdo publicado por ${displayName}.`;
+  if (els.feedSubtitle) {
+    els.feedSubtitle.textContent = `Conteúdo publicado por ${displayName}.`;
+  }
 }
 
 async function loadProfileStats(client, profileId, viewerId) {
@@ -1073,6 +1075,30 @@ function getListingAuthor(post) {
   };
 }
 
+function getListingRecommenders(details) {
+  return (details?.recommenders || []).map((user) => ({
+    id: user.recommender_id || user.id || "",
+    display_name: user.display_name || "",
+    username: user.username || "",
+    avatar_url: user.avatar_url || "",
+  })).filter((user) => user.id || user.username);
+}
+
+function renderListingRecommendationsControl(details, stats, authorId) {
+  const recommenders = getListingRecommenders(details);
+  const count = Number(stats?.recommendations_count || recommenders.length || 0);
+  return `
+    <button class="listing-seller-stat-button" type="button" data-listing-recommendations data-seller-id="${escapeHtml(authorId || "")}">
+      ${escapeHtml(formatCountLabel(count, "recomendação", "recomendações"))}
+    </button>
+  `;
+}
+
+async function openListingRecommendationsModal(authorId) {
+  const details = await loadListingSellerDetails(authorId);
+  openPeopleModal("Recomendações", getListingRecommenders(details));
+}
+
 function renderListingDetail(post, sellerDetails = null) {
   const listingData = getListingCardData(post);
   const game = getListingGame(post);
@@ -1148,7 +1174,7 @@ function renderListingDetail(post, sellerDetails = null) {
           </span>
         </a>
         <div class="listing-seller-stats">
-          <span>${escapeHtml(formatCountLabel(stats.recommendations_count, "recomendação", "recomendações"))}</span>
+          ${renderListingRecommendationsControl(sellerDetails, stats, author.id)}
         </div>
         ${canMessageSeller ? `
           <a class="primary-button listing-message-button message-action-button" href="./messages?listingPostId=${encodeURIComponent(post.id)}">
@@ -1169,7 +1195,7 @@ async function loadListingSellerDetails(authorId) {
   if (!authorId) return null;
   if (state.listingSellerCache.has(authorId)) return state.listingSellerCache.get(authorId);
   const client = await window.GimerrAuth.getClient();
-  const [profileResult, statsResult, linksResult] = await Promise.all([
+  const [profileResult, statsResult, linksResult, recommendersResult] = await Promise.all([
     client
       .from("public_profiles")
       .select("id, display_name, username, avatar_url, phone_e164, phone_contact_whatsapp, phone_contact_telegram")
@@ -1184,14 +1210,20 @@ async function loadListingSellerDetails(authorId) {
       .from("public_profile_platform_links")
       .select("platform, handle, profile_url")
       .eq("profile_id", authorId),
+    client
+      .from("public_profile_recommenders")
+      .select("recommender_id, display_name, username, avatar_url")
+      .eq("profile_id", authorId),
   ]);
   if (profileResult.error) throw profileResult.error;
   if (statsResult.error) throw statsResult.error;
   if (linksResult.error) throw linksResult.error;
+  if (recommendersResult.error) throw recommendersResult.error;
   const details = {
     profile: profileResult.data || {},
     stats: statsResult.data || {},
     platformLinks: linksResult.data || [],
+    recommenders: recommendersResult.data || [],
   };
   state.listingSellerCache.set(authorId, details);
   return details;
@@ -1279,6 +1311,10 @@ async function openListingDetail(postId) {
   const feedPost = state.posts.find((item) => String(item.id) === String(postId));
   if (!els.listingDetailModal || !els.listingDetailContent) return;
   if (feedPost && feedPost.type !== "listing") return;
+  if (!state.session?.user) {
+    window.location.assign("./sign-in.html");
+    return;
+  }
   els.listingDetailModal.hidden = false;
   els.listingDetailContent.innerHTML = `<div class="listing-detail-loading">Carregando anúncio...</div>`;
   try {
@@ -1880,6 +1916,14 @@ document.addEventListener("click", async (event) => {
       console.warn("Não foi possível compartilhar post.", error);
       window.alert("Não foi possível compartilhar este post.");
     }
+    return;
+  }
+
+  const listingRecommendationsButton = target.closest("[data-listing-recommendations]");
+  if (listingRecommendationsButton) {
+    event.preventDefault();
+    closePostMenus();
+    await openListingRecommendationsModal(listingRecommendationsButton.dataset.sellerId || "");
     return;
   }
 

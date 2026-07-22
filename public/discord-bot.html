@@ -34,16 +34,14 @@
           <img src="./assets/discord.svg" alt="" width="34" height="34">
           <div>
             <h1>App do Gimerr no Discord</h1>
-            <p>Conecte o Gimerr a canais de texto do seu servidor e publique automaticamente anúncios de jogos específicos.</p>
+            <p>Conecte o Gimerr a canais de texto do seu servidor para publicar automaticamente conteúdo de jogos específicos.</p>
           </div>
         </div>
-        <div class="discord-bot-actions">
-          <a class="primary-button discord-bot-install" href="https://discord.com/oauth2/authorize?client_id=1500574981959061654&permissions=19456&integration_type=0&scope=bot+applications.commands" target="_blank" rel="noopener">
-            <img src="./assets/share.svg" alt="" width="18" height="18">
-            <span>Instalar App no servidor</span>
-          </a>
-          <a class="text-button" href="./sign-in.html?provider=discord">Entrar com Discord</a>
-        </div>
+      </section>
+
+      <section class="discord-bot-note">
+        <h2>Como funciona</h2>
+        <p>Quando alguém publicar no Gimerr um vídeo ou anúncio de um jogo que você escolheu, o App envia automaticamente uma mensagem no canal-de-texto escolhido, siga o passo a passo abaixo para configurar o app Gimerr no seu Discord.</p>
       </section>
 
       <section class="discord-bot-grid" aria-label="Passo a passo">
@@ -52,8 +50,10 @@
           <h2>Entre no Gimerr com Discord</h2>
           <p>Use a mesma conta do Discord que você usa para administrar o servidor. Se a conta já estiver conectada ao seu perfil, siga para a instalação.</p>
           <div class="discord-bot-card-actions">
-            <a class="text-button" href="./sign-in.html?provider=discord">Fazer login com Discord</a>
-            <a class="text-button" href="./edit-profile.html">Conectar no perfil</a>
+            <a class="oauth-button discord-button discord-bot-discord-login" href="./sign-in.html?provider=discord&returnTo=%2Fdiscord-bot.html">
+              <img src="./assets/discord.svg" alt="" width="20" height="20">
+              <span>Entrar com Discord</span>
+            </a>
           </div>
         </article>
 
@@ -62,16 +62,19 @@
           <h2>Instale o App no servidor</h2>
           <p>Autorize o App do Gimerr no Discord. Ele precisa ver canais, enviar mensagens e inserir links para publicar os cards dos anúncios.</p>
           <div class="discord-bot-card-actions">
-            <a class="text-button" href="https://discord.com/oauth2/authorize?client_id=1500574981959061654&permissions=19456&integration_type=0&scope=bot+applications.commands" target="_blank" rel="noopener">Abrir Discord</a>
+            <a class="primary-button discord-bot-install" href="https://discord.com/oauth2/authorize?client_id=1500574981959061654&permissions=19456&integration_type=0&scope=bot+applications.commands" target="_blank" rel="noopener">
+              <img src="./assets/share.svg" alt="" width="18" height="18">
+              <span>Instalar App no servidor</span>
+            </a>
           </div>
         </article>
 
         <article class="discord-bot-card">
           <span class="discord-bot-step">3</span>
           <h2>Configure o canal</h2>
-          <p>No canal de texto que receberá os anúncios, use o comando do Gimerr buscando o jogo pelo nome.</p>
+          <p>No canal de texto que receberá os anúncios, use o comando abaixo para escolher o game e o tipo de conteúdo das atualizações:</p>
           <div class="discord-command-list">
-            <code>/gimerr setup game: Miracle 7.4</code>
+            <code>/gimerr setup game</code>
           </div>
         </article>
 
@@ -81,14 +84,9 @@
           <p>Use os comandos abaixo para revisar o que está ativo no canal ou remover uma configuração.</p>
           <div class="discord-command-list">
             <code>/gimerr status</code>
-            <code>/gimerr remove game: Miracle 7.4</code>
+            <code>/gimerr remove game</code>
           </div>
         </article>
-      </section>
-
-      <section class="discord-bot-note">
-        <h2>Como funciona</h2>
-        <p>Quando alguém publicar no Gimerr um anúncio de um jogo configurado, o App envia automaticamente uma mensagem no canal escolhido. A configuração vale por canal e jogo.</p>
       </section>
     </main>
   </div>

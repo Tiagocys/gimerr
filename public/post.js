@@ -122,9 +122,10 @@
 
   function renderVideoPoster(post, item) {
     const poster = post.videoThumbnailUrl || "";
+    const videoAdsAttr = post.type === "listing" ? ` data-video-ads="off"` : "";
     return `
       <div class="video-media" data-video-view-container data-post-id="${escapeHtml(post.id || "")}">
-        <button class="video-lazy-button media-frame" type="button" data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
+        <button class="video-lazy-button media-frame" type="button"${videoAdsAttr} data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
           ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
           <span class="video-lazy-play" aria-hidden="true"></span>
         </button>
@@ -457,6 +458,71 @@
       : `<li><span>Sem contatos públicos.</span></li>`;
   }
 
+  function getListingRecommenders(details) {
+    return (details?.recommenders || []).map((user) => ({
+      id: user.recommender_id || user.id || "",
+      display_name: user.display_name || "",
+      username: user.username || "",
+      avatar_url: user.avatar_url || "",
+    })).filter((user) => user.id || user.username);
+  }
+
+  function renderListingRecommendationsControl(details, stats, authorId) {
+    const recommenders = getListingRecommenders(details);
+    const count = Number(stats?.recommendations_count || recommenders.length || 0);
+    return `
+      <button class="listing-seller-stat-button" type="button" data-listing-recommendations data-seller-id="${escapeHtml(authorId || "")}">
+        ${escapeHtml(formatCountLabel(count, "recomendação", "recomendações"))}
+      </button>
+    `;
+  }
+
+  function ensureListingPeopleModal() {
+    let modal = document.querySelector("#listing-people-modal");
+    if (modal) return modal;
+    modal = document.createElement("div");
+    modal.className = "modal-backdrop";
+    modal.id = "listing-people-modal";
+    modal.hidden = true;
+    modal.innerHTML = `
+      <section class="people-modal" role="dialog" aria-modal="true" aria-labelledby="listing-people-modal-title">
+        <div class="modal-head">
+          <h2 id="listing-people-modal-title">Recomendações</h2>
+          <button class="ghost-icon" type="button" data-listing-people-close aria-label="Fechar">x</button>
+        </div>
+        <div class="people-list" data-listing-people-list></div>
+      </section>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (event.target === modal || target?.closest("[data-listing-people-close]")) {
+        modal.hidden = true;
+      }
+    });
+    return modal;
+  }
+
+  async function openListingRecommendationsModal(authorId) {
+    const details = await loadListingSellerDetails(authorId);
+    const users = getListingRecommenders(details);
+    const modal = ensureListingPeopleModal();
+    const list = modal.querySelector("[data-listing-people-list]");
+    list.innerHTML = users.length ? users.map((user) => `
+      <a class="people-row" href="${getProfileUrl({ id: user.id, username: user.username })}">
+        <div class="post-avatar">
+          <img src="${escapeHtml(user.avatar_url || "./assets/avatar.svg")}" alt="">
+        </div>
+        <div>
+          <strong>${escapeHtml(user.display_name || user.username || "Usuário Gimerr")}</strong>
+          ${user.username ? `<span>@${escapeHtml(user.username)}</span>` : ""}
+        </div>
+      </a>
+    `).join("") : `<div class="empty-state">Nenhum usuário por aqui.</div>`;
+    modal.hidden = false;
+    modal.querySelector("[data-listing-people-close]")?.focus();
+  }
+
   function closePostMenus(exceptMenu = null) {
     document.querySelectorAll("[data-post-menu]").forEach((menu) => {
       if (exceptMenu && menu === exceptMenu) return;
@@ -570,7 +636,7 @@
             </span>
           </a>
           <div class="listing-seller-stats">
-            <span>${escapeHtml(formatCountLabel(stats.recommendations_count, "recomendação", "recomendações"))}</span>
+            ${renderListingRecommendationsControl(sellerDetails, stats, author.id)}
           </div>
           ${canMessageSeller ? `
             <a class="primary-button listing-message-button message-action-button" href="./messages?listingPostId=${encodeURIComponent(post.id)}">
@@ -940,7 +1006,7 @@
     if (!authorId || !window.GimerrAuth) return null;
     if (state.listingSellerCache.has(authorId)) return state.listingSellerCache.get(authorId);
     const client = await window.GimerrAuth.getClient();
-    const [profileResult, statsResult, linksResult] = await Promise.all([
+    const [profileResult, statsResult, linksResult, recommendersResult] = await Promise.all([
       client
         .from("public_profiles")
         .select("id, display_name, username, avatar_url, phone_e164, phone_contact_whatsapp, phone_contact_telegram")
@@ -955,14 +1021,20 @@
         .from("public_profile_platform_links")
         .select("platform, handle, profile_url")
         .eq("profile_id", authorId),
+      client
+        .from("public_profile_recommenders")
+        .select("recommender_id, display_name, username, avatar_url")
+        .eq("profile_id", authorId),
     ]);
     if (profileResult.error) throw profileResult.error;
     if (statsResult.error) throw statsResult.error;
     if (linksResult.error) throw linksResult.error;
+    if (recommendersResult.error) throw recommendersResult.error;
     const details = {
       profile: profileResult.data || {},
       stats: statsResult.data || {},
       platformLinks: linksResult.data || [],
+      recommenders: recommendersResult.data || [],
     };
     state.listingSellerCache.set(authorId, details);
     return details;
@@ -1155,6 +1227,14 @@
         console.warn("Não foi possível compartilhar post.", error);
         window.alert("Não foi possível compartilhar este post.");
       }
+      return;
+    }
+
+    const listingRecommendationsButton = target.closest("[data-listing-recommendations]");
+    if (listingRecommendationsButton) {
+      event.preventDefault();
+      closePostMenus();
+      await openListingRecommendationsModal(listingRecommendationsButton.dataset.sellerId || "");
       return;
     }
 

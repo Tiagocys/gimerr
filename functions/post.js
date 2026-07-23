@@ -10,7 +10,7 @@ const POST_HTML_FALLBACK = `<!DOCTYPE html>
   <link rel="icon" type="image/png" href="/assets/favicon.png">
   <title>Post | Gimerr</title>
   <!-- gimerr-og-meta -->
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/styles.css?v=20260722-text-wrap">
 </head>
 <body>
   <div class="app-shell">
@@ -41,11 +41,11 @@ const POST_HTML_FALLBACK = `<!DOCTYPE html>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="/auth-client.js" defer></script>
-  <script src="/user-search.js" defer></script>
+  <script src="/user-search.js?v=20260722-search-remote-submit-only" defer></script>
   <script src="/navbar.js" defer></script>
-  <script src="/video-player.js" defer></script>
-  <script src="/media-lightbox.js" defer></script>
-  <script src="/post.js" defer></script>
+  <script src="/video-player.js?v=20260722-remove-ad-provider" defer></script>
+  <script src="/media-lightbox.js?v=20260722-text-wrap" defer></script>
+  <script src="/post.js?v=20260722-text-wrap" defer></script>
 </body>
 </html>`;
 

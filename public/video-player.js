@@ -1,29 +1,8 @@
 (function initGimerrVideoPlayer() {
   const FLUID_PLAYER_SRC = "https://cdn.fluidplayer.com/v3/current/fluidplayer.min.js";
-  const VIDEO_AD_HOSTS = new Set(["gimerr.com", "www.gimerr.com", "gimerr.pages.dev"]);
-  let adsConfigPromise = null;
   let fluidPlayerPromise = null;
   let fluidPlayerCounter = 0;
   let viewerToken = "";
-
-  function shouldUseVideoAds() {
-    const host = window.location.hostname;
-    return VIDEO_AD_HOSTS.has(host) || host.endsWith(".gimerr.pages.dev");
-  }
-
-  async function getAdsConfig() {
-    if (!adsConfigPromise) {
-      adsConfigPromise = fetch("/api/ads-config", {
-        headers: { accept: "application/json" },
-      })
-        .then((response) => response.ok ? response.json() : {})
-        .catch((error) => {
-          console.warn("Não foi possível carregar configuração de anúncios.", error);
-          return {};
-        });
-    }
-    return adsConfigPromise;
-  }
 
   function formatVideoViewCount(value) {
     const count = Number(value || 0);
@@ -127,36 +106,8 @@
     return fluidPlayerPromise;
   }
 
-  function normalizeVastTag(value) {
-    const tag = String(value || "").trim();
-    if (!tag) return "";
-    try {
-      const url = new URL(tag, window.location.origin);
-      url.searchParams.set("cb", `${Date.now()}-${Math.random().toString(16).slice(2)}`);
-      return url.toString();
-    } catch {
-      return tag;
-    }
-  }
-
-  function getVideoAdList(config) {
-    return [normalizeVastTag(config?.video?.adcashVastTag)]
-      .filter(Boolean)
-      .map((vastTag) => ({
-        roll: "preRoll",
-        vastTag,
-      }));
-  }
-
-  function shouldUseVideoAdsForVideo(video) {
-    if (!shouldUseVideoAds()) return false;
-    if (video?.dataset?.videoAds === "off") return false;
-    if (video?.closest?.("[data-video-ads='off']")) return false;
-    return true;
-  }
-
-  function getFluidOptions(config, video = null) {
-    const options = {
+  function getFluidOptions() {
+    return {
       layoutControls: {
         fillToContainer: true,
         primaryColor: "#111827",
@@ -165,33 +116,10 @@
         posterImageSize: "contain",
       },
     };
-
-    const adList = shouldUseVideoAdsForVideo(video) ? getVideoAdList(config) : [];
-    if (adList.length) {
-      options.vastOptions = {
-        adList,
-        skipButtonCaption: "Pular anúncio em [seconds]",
-        skipButtonClickCaption: "Pular anúncio",
-        adText: null,
-        adCTAText: false,
-        vastTimeout: 4500,
-        maxAllowedVastTagRedirects: 3,
-        playMainVideoWhenVastFails: true,
-        vastAdvanced: {
-          vastLoadedCallback: function vastLoadedCallback() {},
-          noVastVideoCallback: function noVastVideoCallback() {},
-          vastVideoSkippedCallback: function vastVideoSkippedCallback() {},
-          vastVideoEndedCallback: function vastVideoEndedCallback() {},
-        },
-      };
-    }
-
-    return options;
   }
 
   function prewarmVideoPlayer() {
     loadFluidPlayer().catch(() => {});
-    getAdsConfig().catch(() => {});
   }
 
   async function initializeFluidVideo(video) {
@@ -206,12 +134,9 @@
     }
 
     try {
-      const [fluidPlayer, adsConfig] = await Promise.all([
-        loadFluidPlayer(),
-        getAdsConfig(),
-      ]);
+      const fluidPlayer = await loadFluidPlayer();
       if (!fluidPlayer || !video.isConnected) return;
-      video._gimerrFluidPlayer = fluidPlayer(video, getFluidOptions(adsConfig, video));
+      video._gimerrFluidPlayer = fluidPlayer(video, getFluidOptions());
       video.dataset.fluidPlayerState = "ready";
       return video._gimerrFluidPlayer;
     } catch (error) {
@@ -274,7 +199,6 @@
     video.dataset.fluidVideo = "true";
     video.dataset.mediaType = button.dataset.videoType || "video/mp4";
     video.dataset.videoPostId = button.dataset.videoPostId || "";
-    if (button.dataset.videoAds) video.dataset.videoAds = button.dataset.videoAds;
     video.controls = true;
     video.playsInline = true;
     video.preload = "metadata";

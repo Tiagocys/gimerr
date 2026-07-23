@@ -62,6 +62,7 @@
     ],
   };
   const inputs = Array.from(document.querySelectorAll(".search-box input[type='search']"));
+  let currentUserIdPromise = null;
 
   if (!inputs.length || !window.GimerrAuth) return;
 
@@ -96,6 +97,15 @@
 
   function getGameSubmitLabel(term) {
     return `Não encontramos o '${term}' na nossa base de jogos,`;
+  }
+
+  async function getCurrentUserId() {
+    if (!currentUserIdPromise) {
+      currentUserIdPromise = window.GimerrAuth.getSession()
+        .then(({ data }) => data.session?.user?.id || "")
+        .catch(() => "");
+    }
+    return currentUserIdPromise;
   }
 
   function sanitizeSearchTerm(value) {
@@ -834,10 +844,8 @@
       popover.hidden = false;
     }
 
-    function showRemoteGameSearch(term) {
-      controller.results = [];
-      controller.gameResults = [];
-      popover.innerHTML = `
+    function renderRemoteGameSearchAction(term) {
+      return `
         <button class="user-search-result user-search-action user-search-action-text" type="button" data-remote-game-search>
           <span class="user-search-copy">
             <strong>Pesquisar por '${escapeHtml(term)}'</strong>
@@ -845,34 +853,31 @@
           </span>
         </button>
       `;
-      popover.hidden = false;
     }
 
-    function showGameSubmitPrompt(term) {
-      controller.results = [];
-      controller.gameResults = [];
-      popover.innerHTML = `
+    function renderGameSubmitAction(term) {
+      return `
         <button class="user-search-result user-search-action user-search-action-text" type="button" data-game-submit>
           <span class="user-search-copy">
             <span>${escapeHtml(getGameSubmitLabel(term))} <span class="user-search-action-highlight">clique aqui para cadastrá-lo</span></span>
           </span>
         </button>
       `;
-      popover.hidden = false;
     }
 
-    function render(users, games = []) {
+    function render(users, games = [], options = {}) {
       controller.results = users;
       controller.gameResults = games;
 
-      if (!users.length && !games.length) {
-        showRemoteGameSearch(controller.lastTerm);
-        return;
-      }
+      const gameAction = options.gameAction === "submit"
+        ? renderGameSubmitAction(controller.lastTerm)
+        : options.gameAction === "remote"
+          ? renderRemoteGameSearchAction(controller.lastTerm)
+          : "";
 
       popover.innerHTML = `
         ${users.length ? `<div class="user-search-section">Usuários</div>${users.map(renderResult).join("")}` : ""}
-        ${games.length ? `<div class="user-search-section">Jogos</div>${games.map(renderGameResult).join("")}` : ""}
+        ${games.length || gameAction ? `<div class="user-search-section">Jogos</div>${games.map(renderGameResult).join("")}${gameAction}` : ""}
       `;
       popover.hidden = false;
     }
@@ -894,15 +899,16 @@
       try {
         const client = await window.GimerrAuth.getClient();
         const likeTerm = `*${term}*`;
-        const [userResult, gameResponse] = await Promise.all([
+        const [userResult, gameResponse, currentUserId] = await Promise.all([
           client
             .from("public_profiles")
             .select("id, display_name, username, avatar_url")
             .or(`display_name.ilike.${likeTerm},username.ilike.${likeTerm}`)
-            .limit(SEARCH_LIMIT),
+            .limit(SEARCH_LIMIT + 1),
           fetch(`/api/games/search?q=${encodeURIComponent(term)}&limit=${SEARCH_LIMIT}${options.forceRemote ? "&force=1" : ""}`, {
             headers: { accept: "application/json" },
           }),
+          getCurrentUserId(),
         ]);
 
         if (requestId !== controller.requestId) return;
@@ -913,15 +919,19 @@
           console.warn("Não foi possível buscar jogos.", gamePayload.error || gameResponse.status);
         }
 
-        const users = userResult.data || [];
+        const users = (userResult.data || [])
+          .filter((profile) => String(profile.id || "") !== String(currentUserId || ""))
+          .slice(0, SEARCH_LIMIT);
         const games = gameResponse.ok ? (gamePayload.games || []) : [];
 
-        if (options.forceRemote && !users.length && !games.length) {
-          showGameSubmitPrompt(term);
+        if (options.forceRemote && !games.length) {
+          render([], [], { gameAction: "submit" });
           return;
         }
 
-        render(users, games);
+        render(users, games, {
+          gameAction: games.length ? "" : options.forceRemote ? "submit" : "remote",
+        });
       } catch (error) {
         console.warn("Não foi possível buscar no Gimerr.", error);
         if (requestId === controller.requestId) showMessage("Não foi possível carregar a busca agora.");

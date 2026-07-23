@@ -21,7 +21,7 @@
   <link rel="canonical" href="https://gimerr.com/">
   <link rel="icon" type="image/png" href="/assets/favicon.png">
   <title>Gimerr</title>
-  <link rel="stylesheet" href="./styles.css?v=20260722-share-title-no-p">
+  <link rel="stylesheet" href="./styles.css?v=20260722-text-wrap">
 </head>
 <body>
   <div class="app-shell">
@@ -75,7 +75,7 @@
             <button class="tab-button is-active" type="button" data-composer-mode="post" role="tab" aria-selected="true">Post</button>
             <button class="tab-button" type="button" data-composer-mode="listing" role="tab" aria-selected="false">Anúncio</button>
           </div>
-          <textarea id="composer-text" rows="4" maxlength="220" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser."></textarea>
+          <textarea id="composer-text" rows="4" maxlength="5000" placeholder="Compartilhe uma jogada, chame a comunidade para jogar ou fale sobre o que você quiser."></textarea>
           <div class="composer-mention-suggestions" id="composer-mention-suggestions" hidden></div>
           <div class="composer-emoji-picker" id="composer-emoji-picker" hidden aria-label="Selecionar emoji"></div>
           <div class="listing-video-upload">
@@ -207,15 +207,14 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
   <script src="./auth-client.js?v=20260722-silent-session-check" defer></script>
-  <script src="./user-search.js?v=20260722-game-short-url" defer></script>
+  <script src="./user-search.js?v=20260722-search-remote-submit-only" defer></script>
   <script src="./navbar.js?v=20260722-silent-session-check" defer></script>
-  <script src="./video-player.js?v=20260721-public-feed" defer></script>
-  <script src="./adcash-ads.js?v=20260721-adcash-zones" defer></script>
-  <script src="./media-lightbox.js?v=20260722-hide-empty-lightbox-comments" defer></script>
+  <script src="./video-player.js?v=20260722-remove-ad-provider" defer></script>
+  <script src="./media-lightbox.js?v=20260722-text-wrap" defer></script>
   <script src="./vendor/qrcode.js" defer></script>
   <script src="./share-modal.js?v=20260722-share-title-no-p" defer></script>
   <script src="./report-modal.js" defer></script>
   <script type="module" src="./vendor/emoji-picker-element/index.js"></script>
-  <script src="./app.js?v=20260722-game-short-url" defer></script>
+  <script src="./app.js?v=20260722-text-wrap" defer></script>
 </body>
 </html>

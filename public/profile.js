@@ -211,7 +211,7 @@ function renderVideoPoster(post, item) {
   const poster = post.videoThumbnailUrl || "";
   return `
     <div class="video-media" data-video-view-container data-post-id="${escapeHtml(post.id || "")}">
-      <button class="video-lazy-button media-frame" type="button" data-video-ads="off" data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
+      <button class="video-lazy-button media-frame" type="button" data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
         ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
         <span class="video-lazy-play" aria-hidden="true"></span>
       </button>
@@ -265,6 +265,15 @@ function renderTextWithMentions(text, authorUsername = "") {
 
   output += escapeHtml(value.slice(lastIndex));
   return output;
+}
+
+function renderExpandableText(textHtml, rawText, className = "post-text", limit = 420) {
+  if (!String(rawText || "").trim()) return "";
+  const shouldCollapse = String(rawText || "").length > limit;
+  return `
+    <p class="${className}${shouldCollapse ? " expandable-text" : ""}" ${shouldCollapse ? "data-expandable-text" : ""}>${textHtml}</p>
+    ${shouldCollapse ? `<button class="text-button expandable-text-toggle" type="button" data-expandable-toggle>Mostrar mais</button>` : ""}
+  `;
 }
 
 function getActiveMention(text, cursor) {
@@ -361,8 +370,10 @@ function insertCommentMention(profile) {
   const before = text.slice(0, state.commentMention.start);
   const after = text.slice(state.commentMention.end);
   const nextValue = `${before}@${profile.username} ${after}`;
-  const nextCursor = before.length + profile.username.length + 2;
-  textarea.value = nextValue.slice(0, Number(textarea.maxLength || 500));
+  const maxLength = Number(textarea.maxLength || 0);
+  const boundedValue = maxLength > 0 ? nextValue.slice(0, maxLength) : nextValue;
+  const nextCursor = Math.min(before.length + profile.username.length + 2, boundedValue.length);
+  textarea.value = boundedValue;
   closeCommentMentionSuggestions();
   textarea.focus();
   textarea.setSelectionRange(nextCursor, nextCursor);
@@ -842,10 +853,10 @@ function renderPostTextBlock(post, textHtml) {
   const postId = String(post?.id || "");
   const isEditing = state.editingPostId === postId;
   const isSubmitting = state.editSubmittingPostId === postId;
-  if (!isEditing) return textHtml ? `<p class="post-text">${textHtml}</p>` : "";
+  if (!isEditing) return renderExpandableText(textHtml, post.body || "", "post-text", 420);
   return `
     <form class="post-edit-form" data-post-edit-form data-post-id="${escapeHtml(postId)}">
-      <textarea class="post-edit-textarea" name="body" maxlength="1200" rows="4">${escapeHtml(post.body || "")}</textarea>
+      <textarea class="post-edit-textarea" name="body" rows="4" maxlength="5000">${escapeHtml(post.body || "")}</textarea>
       <div class="post-edit-actions">
         <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>${isSubmitting ? "Salvando..." : "Salvar"}</button>
         <button class="text-button" type="button" data-post-edit-cancel data-post-id="${escapeHtml(postId)}" ${isSubmitting ? "disabled" : ""}>Cancelar</button>
@@ -1412,7 +1423,7 @@ function renderInlineCommentReplyForm(postId, comment) {
   const isSubmitting = String(state.commentSubmittingPostId) === String(comment.id);
   return `
     <form class="inline-comment-form inline-reply-form" data-inline-comment-form data-post-id="${escapeHtml(postId)}" data-parent-comment-id="${escapeHtml(comment.id)}">
-      <textarea maxlength="500" rows="2" placeholder="Responder comentário">${getReplyMention(comment)}</textarea>
+      <textarea rows="2" maxlength="5000" placeholder="Responder comentário">${getReplyMention(comment)}</textarea>
       <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
       ${renderCommentTools()}
       <div class="inline-comment-actions">
@@ -1444,7 +1455,7 @@ function renderInlineCommentItem(comment, postId, commentsById) {
             <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
           </div>
           ${renderCommentReplyReference(comment, commentsById)}
-          ${comment.body ? `<p>${renderTextWithMentions(comment.body, author.username)}</p>` : ""}
+          ${comment.body ? renderExpandableText(renderTextWithMentions(comment.body, author.username), comment.body, "comment-text", 280) : ""}
           ${renderCommentMedia(comment)}
           <div class="comment-actions">
             ${isAuthenticated ? `<button class="text-button comment-reply-button" type="button" data-comment-reply data-post-id="${escapeHtml(postId)}" data-comment-id="${escapeHtml(comment.id)}">Responder</button>` : ""}
@@ -1529,11 +1540,11 @@ function renderInlineCommentForm(post) {
   const isSubmitting = String(state.commentSubmittingPostId) === String(post.id);
   return `
     <form class="inline-comment-form" data-inline-comment-form data-post-id="${escapeHtml(post.id)}">
-      <textarea maxlength="500" rows="2" placeholder="Escreva um comentário"></textarea>
+      <textarea rows="2" maxlength="5000" placeholder="Escreva um comentário"></textarea>
       <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
       ${renderCommentTools()}
       <div class="inline-comment-actions">
-        <span>Até 500 caracteres.</span>
+        <span></span>
         <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>
           ${isSubmitting ? "Comentando..." : "Comentar"}
         </button>
@@ -1914,16 +1925,9 @@ function renderFeed({ prepareVideos = true } = {}) {
         </div>
       </article>
     `;
-    const position = index + 1;
-    const adInterval = 10;
-    const firstAdPosition = filtered.length < adInterval ? Math.max(1, Math.ceil(filtered.length / 2)) : adInterval;
-    const shouldInsertAd = filtered.length >= 1
-      && (position === firstAdPosition || (position > firstAdPosition && (position - firstAdPosition) % adInterval === 0));
-    const adHtml = isListingFilter && isListing && shouldInsertAd ? (window.GimerrAdcashAds?.renderMarketplaceAdCard?.() || "") : "";
-    return `${cardHtml}${adHtml}`;
+    return cardHtml;
   }).join("");
   if (prepareVideos) window.GimerrVideoPlayer?.prepare(els.feedList);
-  if (isListingFilter) window.GimerrAdcashAds?.prepareMarketplaceAds?.(els.feedList);
 }
 
 function setProfileFeedFilter(filter) {
@@ -2023,6 +2027,16 @@ els.listingDetailModal?.addEventListener("click", (event) => {
 document.addEventListener("click", async (event) => {
   const target = event.target instanceof Element ? event.target : event.target?.parentElement;
   if (!target) return;
+
+  const expandButton = target.closest("[data-expandable-toggle]");
+  if (expandButton) {
+    event.preventDefault();
+    const text = expandButton.previousElementSibling;
+    text?.classList.remove("expandable-text");
+    text?.removeAttribute("data-expandable-text");
+    expandButton.remove();
+    return;
+  }
 
   const commentEmojiButton = target.closest("[data-comment-emoji]");
   if (commentEmojiButton) {

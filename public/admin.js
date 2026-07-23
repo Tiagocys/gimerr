@@ -27,6 +27,9 @@
     ticketsLoaded: false,
     selectedTicketId: "",
     badgesLoading: false,
+    ticketsRefreshing: false,
+    ticketThreadRefreshing: false,
+    ticketPollingTimer: null,
     taxonomy: {
       genres: [],
       platforms: [],
@@ -34,6 +37,8 @@
     taxonomyLoaded: false,
     taxonomyError: "",
   };
+
+  const ADMIN_TICKET_POLL_MS = 12000;
 
   const TAXONOMY_LIMITS = {
     genres: 5,
@@ -98,6 +103,30 @@
     return "Pendente";
   }
 
+  function reportPostLabel(type) {
+    if (type === "video") return "vídeo";
+    if (type === "listing") return "anúncio";
+    return "post";
+  }
+
+  function reportPostTitleLabel(type) {
+    if (type === "video") return "Vídeo denunciado";
+    if (type === "listing") return "Anúncio denunciado";
+    return "Post denunciado";
+  }
+
+  function getReportPostHref(post) {
+    if (!post?.id || post.status === "deleted") return "";
+    return `./post?id=${encodeURIComponent(post.id)}`;
+  }
+
+  function renderReportPostLink(post, { compact = false } = {}) {
+    const href = getReportPostHref(post);
+    if (!href) return `<span class="admin-post-link-unavailable">Post indisponível</span>`;
+    const label = compact ? "Abrir post" : `Abrir ${reportPostLabel(post.type)} denunciado`;
+    return `<a class="admin-post-link" href="${href}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
+  }
+
   function accountStatusLabel(status) {
     if (status === "suspended") return "suspensa";
     if (status === "banned") return "banida";
@@ -122,7 +151,7 @@
         <div class="admin-report-body">
           <div class="admin-request-title-row">
             <div>
-              <h2>${escapeHtml(report.post?.type === "video" ? "Vídeo denunciado" : report.post?.type === "listing" ? "Anúncio denunciado" : "Post denunciado")}</h2>
+              <h2>${escapeHtml(reportPostTitleLabel(report.post?.type))}</h2>
               <p>Denunciado em ${escapeHtml(formatAdminDate(report.createdAt))}</p>
             </div>
             <span class="status-pill ${pending ? "pending" : "approved"}">${escapeHtml(pending ? "Pendente" : reportResolutionLabel(report.resolution))}</span>
@@ -130,6 +159,7 @@
           <dl class="admin-report-details">
             <div><dt>Denunciante</dt><dd>${escapeHtml(reportProfileLabel(report.reporter))}</dd></div>
             <div><dt>Autor do post</dt><dd>${escapeHtml(reportProfileLabel(report.reportedUser))}${escapeHtml(targetStatus)}</dd></div>
+            <div><dt>Post denunciado</dt><dd>${renderReportPostLink(report.post)}</dd></div>
             <div><dt>Motivo</dt><dd>${escapeHtml(report.reason)}</dd></div>
             ${report.post?.body ? `<div><dt>Texto do post</dt><dd>${escapeHtml(report.post.body)}</dd></div>` : ""}
             ${report.reviewedAt ? `<div><dt>Analisada em</dt><dd>${escapeHtml(formatAdminDate(report.reviewedAt))}</dd></div>` : ""}
@@ -227,6 +257,7 @@
     if (!source) return "";
     if (source.type === "post_report") {
       const profile = source.profile;
+      const postLink = renderReportPostLink(source.post, { compact: true });
       const profileLabel = profile
         ? [profile.displayName, profile.username ? `@${profile.username}` : ""].filter(Boolean).join(" · ")
         : "Autor indisponível";
@@ -237,12 +268,12 @@
         <article class="admin-ticket-source-card">
           <div class="admin-ticket-source-media">${renderTicketSourceMedia(source)}</div>
           <div class="admin-ticket-source-body">
-            <strong>${escapeHtml(source.label || "Anúncio denunciado")}</strong>
+            <strong>${escapeHtml(source.label || reportPostTitleLabel(source.post?.type))}</strong>
             <p>${profileHtml}</p>
             ${source.post?.body ? `<p>${escapeHtml(source.post.body)}</p>` : ""}
             <dl>
               <div><dt>Motivo</dt><dd>${escapeHtml(source.reason || "Sem motivo informado.")}</dd></div>
-              ${source.post?.id ? `<div><dt>Post</dt><dd><a href="./post?id=${encodeURIComponent(source.post.id)}" target="_blank" rel="noopener">Abrir anúncio</a></dd></div>` : ""}
+              <div><dt>Post denunciado</dt><dd>${postLink}</dd></div>
             </dl>
           </div>
         </article>
@@ -292,8 +323,45 @@
     `;
   }
 
-  async function loadTickets() {
-    setTicketFeedback("Carregando casos...");
+  function syncTicketCloseButtonState() {
+    const textarea = els.ticketThread.querySelector("[data-ticket-reply-body]");
+    const closeButton = els.ticketThread.querySelector("[data-ticket-close]");
+    if (!textarea || !closeButton) return;
+    const hasDraft = hasTicketReplyDraft();
+    closeButton.disabled = hasDraft;
+    closeButton.title = hasDraft
+      ? "Apague a resposta escrita antes de encerrar o caso."
+      : "";
+  }
+
+  function hasTicketReplyDraft() {
+    const textarea = els.ticketThread.querySelector("[data-ticket-reply-body]");
+    return Boolean(textarea?.value?.trim());
+  }
+
+  function isTicketsPanelActive() {
+    return [...els.panels].some((panel) => panel.dataset.adminPanel === "tickets" && !panel.hidden);
+  }
+
+  function stopTicketPolling() {
+    if (!state.ticketPollingTimer) return;
+    clearInterval(state.ticketPollingTimer);
+    state.ticketPollingTimer = null;
+  }
+
+  function startTicketPolling() {
+    stopTicketPolling();
+    if (!isTicketsPanelActive() || document.hidden) return;
+    state.ticketPollingTimer = setInterval(() => {
+      if (!isTicketsPanelActive() || document.hidden) return;
+      loadTickets({ silent: true, refreshThread: true });
+    }, ADMIN_TICKET_POLL_MS);
+  }
+
+  async function loadTickets({ silent = false, refreshThread = false } = {}) {
+    if (state.ticketsRefreshing) return;
+    state.ticketsRefreshing = true;
+    if (!silent) setTicketFeedback("Carregando casos...");
     try {
       const token = await getAuthToken();
       const response = await fetch(`/api/admin-tickets?status=${encodeURIComponent(els.ticketFilter.value)}`, {
@@ -303,22 +371,31 @@
       if (!response.ok) throw new Error(payload.error || "Não foi possível carregar casos.");
       state.tickets = payload.tickets || [];
       state.ticketsLoaded = true;
-      setTicketFeedback(`${state.tickets.length} caso(s) carregado(s).`, "success");
+      if (!silent) setTicketFeedback(`${state.tickets.length} caso(s) carregado(s).`, "success");
       renderTickets();
+      if (refreshThread && state.selectedTicketId && !hasTicketReplyDraft()) {
+        await loadTicketThread(state.selectedTicketId, { silent: true });
+      }
       loadAdminBadges();
     } catch (error) {
-      setTicketFeedback(error.message || "Falha ao carregar casos.", "error");
-      els.ticketList.innerHTML = "";
-      els.ticketThread.innerHTML = `<div class="empty-state">Não foi possível carregar os casos.</div>`;
+      if (!silent) {
+        setTicketFeedback(error.message || "Falha ao carregar casos.", "error");
+        els.ticketList.innerHTML = "";
+        els.ticketThread.innerHTML = `<div class="empty-state">Não foi possível carregar os casos.</div>`;
+      }
+    } finally {
+      state.ticketsRefreshing = false;
     }
   }
 
-  async function loadTicketThread(ticketId) {
+  async function loadTicketThread(ticketId, { silent = false } = {}) {
+    if (state.ticketThreadRefreshing) return;
+    state.ticketThreadRefreshing = true;
     state.selectedTicketId = ticketId;
     els.ticketList.querySelectorAll("[data-ticket-id]").forEach((button) => {
       button.classList.toggle("is-active", button.dataset.ticketId === ticketId);
     });
-    els.ticketThread.innerHTML = `<div class="empty-state">Carregando conversa...</div>`;
+    if (!silent) els.ticketThread.innerHTML = `<div class="empty-state">Carregando conversa...</div>`;
     try {
       const token = await getAuthToken();
       const response = await fetch(`/api/admin-ticket-thread?ticketId=${encodeURIComponent(ticketId)}`, {
@@ -342,7 +419,11 @@
         ${renderTicketComposer(ticket)}
       `;
     } catch (error) {
-      els.ticketThread.innerHTML = `<div class="empty-state">${escapeHtml(error.message || "Falha ao carregar conversa.")}</div>`;
+      if (!silent) {
+        els.ticketThread.innerHTML = `<div class="empty-state">${escapeHtml(error.message || "Falha ao carregar conversa.")}</div>`;
+      }
+    } finally {
+      state.ticketThreadRefreshing = false;
     }
   }
 
@@ -464,8 +545,11 @@
   function setAdminTab(tab) {
     els.tabs.forEach((button) => button.classList.toggle("is-active", button.dataset.adminTab === tab));
     els.panels.forEach((panel) => { panel.hidden = panel.dataset.adminPanel !== tab; });
+    stopTicketPolling();
     if (tab === "reports") loadReports();
-    if (tab === "tickets") loadTickets();
+    if (tab === "tickets") {
+      loadTickets().finally(startTicketPolling);
+    }
   }
 
   async function loadAdminBadges() {
@@ -876,6 +960,15 @@
   els.tabs.forEach((button) => {
     button.addEventListener("click", () => setAdminTab(button.dataset.adminTab));
   });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopTicketPolling();
+      return;
+    }
+    if (isTicketsPanelActive()) {
+      loadTickets({ silent: true, refreshThread: true }).finally(startTicketPolling);
+    }
+  });
   els.reportList.addEventListener("click", (event) => {
     const button = event.target.closest("[data-report-action]");
     if (!button) return;
@@ -898,6 +991,10 @@
     if (replyButton) {
       replyTicket(replyButton.dataset.ticketReply);
     }
+  });
+  els.ticketThread.addEventListener("input", (event) => {
+    if (!event.target.closest("[data-ticket-reply-body]")) return;
+    syncTicketCloseButtonState();
   });
   els.list.addEventListener("click", (event) => {
     const button = event.target.closest("[data-admin-action]");

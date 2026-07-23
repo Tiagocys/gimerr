@@ -3,23 +3,24 @@ import { getServiceHeaders } from "../../_shared/admin.js";
 
 const MAX_LISTING_MEDIA_ITEMS = 15;
 const MAX_LISTING_VIDEO_ITEMS = 1;
+const MAX_BODY_LENGTH = 5000;
 const VIDEO_MEDIA_PREFIXES = ["videos/originals/", "videos/ready/", "videos/"];
 const VIDEO_THUMBNAIL_PREFIX = "videos/thumbnails/";
 
 function cleanText(value, maxLength) {
-  return String(value || "")
+  const text = String(value || "")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, maxLength);
+    .trim();
+  return Number.isFinite(maxLength) ? text.slice(0, maxLength) : text;
 }
 
 function cleanBodyText(value, maxLength) {
-  return String(value || "")
+  const text = String(value || "")
     .replace(/\r\n?/g, "\n")
     .replace(/[^\S\n]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
-    .trim()
-    .slice(0, maxLength);
+    .trim();
+  return Number.isFinite(maxLength) ? text.slice(0, maxLength) : text;
 }
 
 function collectMediaKeys(items) {
@@ -139,7 +140,7 @@ export async function onRequestPost({ request, env }) {
 
     const payload = await request.json().catch(() => ({}));
     const postId = cleanText(payload.postId, 80);
-    const body = cleanBodyText(payload.body, 1200);
+    const body = cleanBodyText(payload.body, MAX_BODY_LENGTH);
     if (!postId) return jsonResponse({ error: "Post ausente." }, { status: 400 });
 
     const post = await fetchPost(env, postId);

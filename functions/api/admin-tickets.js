@@ -6,8 +6,14 @@ function cleanStatus(value) {
   return new Set(["open", "reopened", "resolved", "closed", "all"]).has(value) ? value : "open";
 }
 
+function postReportLabel(type) {
+  if (type === "video") return "Denúncia de vídeo";
+  if (type === "listing") return "Denúncia de anúncio";
+  return "Denúncia de post";
+}
+
 function sourceLabel(ticket, source) {
-  if (ticket.source_type === "post_report") return "Denúncia de anúncio";
+  if (ticket.source_type === "post_report") return postReportLabel(source?.reported_post_type);
   if (ticket.source_type === "profile_report") return "Denúncia de perfil";
   if (ticket.source_type === "game_submission") {
     return source?.name ? `Cadastro de jogo: ${source.name}` : "Solicitação de cadastro de jogo";

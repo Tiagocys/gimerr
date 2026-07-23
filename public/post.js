@@ -122,10 +122,9 @@
 
   function renderVideoPoster(post, item) {
     const poster = post.videoThumbnailUrl || "";
-    const videoAdsAttr = post.type === "listing" ? ` data-video-ads="off"` : "";
     return `
       <div class="video-media" data-video-view-container data-post-id="${escapeHtml(post.id || "")}">
-        <button class="video-lazy-button media-frame" type="button"${videoAdsAttr} data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
+        <button class="video-lazy-button media-frame" type="button" data-video-post-id="${escapeHtml(post.id || "")}" data-video-src="${escapeHtml(item.url)}" data-video-type="${escapeHtml(item.mediaType || "video/mp4")}" ${poster ? `data-video-poster="${escapeHtml(poster)}"` : ""} aria-label="Reproduzir vídeo">
           ${poster ? `<img class="video-lazy-poster" src="${escapeHtml(poster)}" alt="">` : `<span class="video-lazy-empty">Vídeo</span>`}
           <span class="video-lazy-play" aria-hidden="true"></span>
         </button>
@@ -179,6 +178,15 @@
 
     output += escapeHtml(value.slice(lastIndex));
     return output;
+  }
+
+  function renderExpandableText(textHtml, rawText, className = "post-text", limit = 420) {
+    if (!String(rawText || "").trim()) return "";
+    const shouldCollapse = String(rawText || "").length > limit;
+    return `
+      <p class="${className}${shouldCollapse ? " expandable-text" : ""}" ${shouldCollapse ? "data-expandable-text" : ""}>${textHtml}</p>
+      ${shouldCollapse ? `<button class="text-button expandable-text-toggle" type="button" data-expandable-toggle>Mostrar mais</button>` : ""}
+    `;
   }
 
   function getActiveMention(text, cursor) {
@@ -276,8 +284,10 @@
     const before = text.slice(0, state.commentMention.start);
     const after = text.slice(state.commentMention.end);
     const nextValue = `${before}@${profile.username} ${after}`;
-    const nextCursor = before.length + profile.username.length + 2;
-    textarea.value = nextValue.slice(0, Number(textarea.maxLength || 500));
+    const maxLength = Number(textarea.maxLength || 0);
+    const boundedValue = maxLength > 0 ? nextValue.slice(0, maxLength) : nextValue;
+    const nextCursor = Math.min(before.length + profile.username.length + 2, boundedValue.length);
+    textarea.value = boundedValue;
     closeCommentMentionSuggestions();
     textarea.focus();
     textarea.setSelectionRange(nextCursor, nextCursor);
@@ -655,11 +665,11 @@
 
   function renderPostTextBlock(post) {
     if (!state.editingPost) {
-      return post.body ? `<p class="post-text">${escapeHtml(post.body)}</p>` : "";
+      return post.body ? renderExpandableText(renderTextWithMentions(post.body, post.author?.username), post.body, "post-text", 420) : "";
     }
     return `
       <form class="post-edit-form" data-post-edit-form data-post-id="${escapeHtml(post.id || "")}">
-        <textarea class="post-edit-textarea" name="body" maxlength="1200" rows="4">${escapeHtml(post.body || "")}</textarea>
+        <textarea class="post-edit-textarea" name="body" rows="4" maxlength="5000">${escapeHtml(post.body || "")}</textarea>
         <div class="post-edit-actions">
           <button class="primary-button" type="submit" ${state.editSubmitting ? "disabled" : ""}>${state.editSubmitting ? "Salvando..." : "Salvar"}</button>
           <button class="text-button" type="button" data-post-edit-cancel data-post-id="${escapeHtml(post.id || "")}" ${state.editSubmitting ? "disabled" : ""}>Cancelar</button>
@@ -846,11 +856,11 @@
     const form = state.session?.user
       ? `
         <form class="comment-form" id="comment-form" data-comment-form>
-          <textarea id="comment-body" maxlength="500" rows="3" placeholder="Escreva um comentário"></textarea>
+          <textarea id="comment-body" rows="3" maxlength="5000" placeholder="Escreva um comentário"></textarea>
           <div class="composer-mention-suggestions comment-mention-suggestions" id="comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
           ${renderCommentTools()}
           <div class="comment-form-actions">
-            <span>Até 500 caracteres.</span>
+            <span></span>
             <button class="primary-button" type="submit" ${state.commentSubmitting ? "disabled" : ""}>
               ${state.commentSubmitting ? "Comentando..." : "Comentar"}
             </button>
@@ -938,7 +948,7 @@
     if (!state.session?.user) return `<a class="text-button comment-login-link" href="./sign-in.html">Entre para responder</a>`;
     return `
       <form class="comment-form inline-reply-form" data-comment-form data-parent-comment-id="${escapeHtml(comment.id)}">
-        <textarea maxlength="500" rows="2" placeholder="Responder comentário">${getReplyMention(comment)}</textarea>
+        <textarea rows="2" maxlength="5000" placeholder="Responder comentário">${getReplyMention(comment)}</textarea>
         <div class="composer-mention-suggestions comment-mention-suggestions" data-comment-mention-suggestions hidden></div>
         ${renderCommentTools()}
         <div class="comment-form-actions">
@@ -969,7 +979,7 @@
               <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
             </div>
             ${renderCommentReplyReference(comment, commentsById)}
-            ${comment.body ? `<p>${renderTextWithMentions(comment.body, author.username)}</p>` : ""}
+            ${comment.body ? renderExpandableText(renderTextWithMentions(comment.body, author.username), comment.body, "comment-text", 280) : ""}
             ${renderCommentMedia(comment)}
             <div class="comment-actions">
               <button class="text-button comment-reply-button" type="button" data-comment-reply data-comment-id="${escapeHtml(comment.id)}">Responder</button>
@@ -1336,6 +1346,16 @@
   document.addEventListener("click", async (event) => {
     const target = event.target instanceof Element ? event.target : event.target?.parentElement;
     if (!target) return;
+
+    const expandButton = target.closest("[data-expandable-toggle]");
+    if (expandButton) {
+      event.preventDefault();
+      const text = expandButton.previousElementSibling;
+      text?.classList.remove("expandable-text");
+      text?.removeAttribute("data-expandable-text");
+      expandButton.remove();
+      return;
+    }
 
     const menuToggle = target.closest("[data-post-menu-toggle]");
     if (menuToggle) {

@@ -2,6 +2,12 @@ import { jsonResponse } from "../_shared/auth.js";
 import { requireAdminUser } from "../_shared/admin.js";
 import { cleanUuid, fetchRows, inFilter, toProfile } from "../_shared/messages.js";
 
+function postReportLabel(type) {
+  if (type === "video") return "Vídeo denunciado";
+  if (type === "listing") return "Anúncio denunciado";
+  return "Post denunciado";
+}
+
 async function loadTicketSource(env, ticket) {
   if (ticket.source_type === "post_report") {
     const [report] = await fetchRows(env, "post_reports", {
@@ -10,6 +16,13 @@ async function loadTicketSource(env, ticket) {
       limit: "1",
     });
     if (!report) return null;
+    const [post] = report.post_id
+      ? await fetchRows(env, "feed_posts", {
+        select: "id,status",
+        id: `eq.${report.post_id}`,
+        limit: "1",
+      })
+      : [];
     const [profile] = report.reported_profile_id
       ? await fetchRows(env, "profiles", {
         select: "id,display_name,username,avatar_url,status",
@@ -19,10 +32,11 @@ async function loadTicketSource(env, ticket) {
       : [];
     return {
       type: "post_report",
-      label: "Anúncio denunciado",
+      label: postReportLabel(report.reported_post_type),
       reason: report.reason || "",
       post: {
         id: report.post_id,
+        status: post?.status || "deleted",
         type: report.reported_post_type || "",
         body: report.reported_post_body || "",
         mediaUrl: report.reported_media_url || "",

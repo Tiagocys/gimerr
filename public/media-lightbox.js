@@ -83,6 +83,15 @@
     return output;
   }
 
+  function renderExpandableText(textHtml, rawText, className = "comment-text", limit = 280) {
+    if (!String(rawText || "").trim()) return "";
+    const shouldCollapse = String(rawText || "").length > limit;
+    return `
+      <p class="${className}${shouldCollapse ? " expandable-text" : ""}" ${shouldCollapse ? "data-expandable-text" : ""}>${textHtml}</p>
+      ${shouldCollapse ? `<button class="text-button expandable-text-toggle" type="button" data-expandable-toggle>Mostrar mais</button>` : ""}
+    `;
+  }
+
   function buildCommentsById(comments) {
     return new Map((comments || []).map((comment) => [String(comment.id), comment]));
   }
@@ -161,6 +170,15 @@
     backdrop.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
       if (!target) return;
+      const expandButton = target.closest("[data-expandable-toggle]");
+      if (expandButton) {
+        event.preventDefault();
+        const text = expandButton.previousElementSibling;
+        text?.classList.remove("expandable-text");
+        text?.removeAttribute("data-expandable-text");
+        expandButton.remove();
+        return;
+      }
       const replyButton = target.closest("[data-lightbox-comment-reply]");
       if (replyButton) {
         state.replyingToCommentId = replyButton.getAttribute("data-comment-id") || "";
@@ -217,9 +235,9 @@
     const isSubmitting = state.commentSubmitting;
     return `
       <form class="inline-comment-form media-lightbox-comment-form" data-lightbox-comment-form data-parent-comment-id="${escapeHtml(parentId)}">
-        <textarea maxlength="500" rows="2" placeholder="${parentId ? "Responder comentário" : "Escreva um comentário"}">${parentId ? escapeHtml(getReplyMention(parentComment)) : ""}</textarea>
+        <textarea rows="2" maxlength="5000" placeholder="${parentId ? "Responder comentário" : "Escreva um comentário"}">${parentId ? escapeHtml(getReplyMention(parentComment)) : ""}</textarea>
         <div class="inline-comment-actions">
-          ${parentId ? `<button class="text-button" type="button" data-lightbox-reply-cancel>Cancelar</button>` : `<span>Até 500 caracteres.</span>`}
+          ${parentId ? `<button class="text-button" type="button" data-lightbox-reply-cancel>Cancelar</button>` : `<span></span>`}
           <button class="primary-button" type="submit" ${isSubmitting ? "disabled" : ""}>
             ${isSubmitting ? "Enviando..." : parentId ? "Responder" : "Comentar"}
           </button>
@@ -247,7 +265,7 @@
               <span>${escapeHtml([authorHandle, formatRelativeTime(comment.createdAt)].filter(Boolean).join(" · "))}</span>
             </div>
             ${renderCommentReplyReference(comment, commentsById)}
-            <p>${renderTextWithMentions(comment.body, author.username)}</p>
+            ${renderExpandableText(renderTextWithMentions(comment.body, author.username), comment.body)}
             <div class="comment-actions">
               <button class="text-button comment-reply-button" type="button" data-lightbox-comment-reply data-comment-id="${escapeHtml(comment.id)}">Responder</button>
               ${canDelete ? `

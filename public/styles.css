@@ -758,142 +758,6 @@ h2 {
   text-decoration: underline;
 }
 
-.ad-provider-slot {
-  position: relative;
-  display: grid;
-  width: min(100%, 300px);
-  min-height: 0;
-  aspect-ratio: 300 / 250;
-  justify-self: center;
-  align-content: end;
-  gap: 9px;
-  overflow: hidden;
-  place-items: center;
-  border: 1px dashed #cbd5e1;
-  border-radius: 8px;
-  background: #f8fafc;
-  padding: 14px;
-}
-
-.ad-provider-slot[hidden] {
-  display: none;
-}
-
-.ad-provider-slot.is-loading::before {
-  position: absolute;
-  inset: 0;
-  content: "";
-  transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.68), transparent);
-  animation: skeleton-shimmer 1.25s infinite;
-}
-
-.ad-provider-slot.is-loading::after {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  content: "Publicidade";
-  border-radius: 999px;
-  padding: 4px 8px;
-  background: rgba(15, 23, 42, 0.07);
-  color: var(--muted);
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.02em;
-}
-
-.ad-loader-line {
-  display: block;
-  width: 62%;
-  height: 10px;
-  justify-self: start;
-  border-radius: 999px;
-  background: #e2e8f0;
-}
-
-.ad-loader-line-wide {
-  width: 82%;
-}
-
-.ad-provider-slot.is-filled {
-  min-height: 0;
-  aspect-ratio: auto;
-  border: 0;
-  background: transparent;
-  padding: 0;
-}
-
-.ad-provider-slot ins {
-  display: block;
-  width: 100%;
-}
-
-.marketplace-ad-card {
-  pointer-events: auto;
-}
-
-.marketplace-ad-frame {
-  position: relative;
-  width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  aspect-ratio: 1 / 1;
-  background: var(--surface-strong);
-}
-
-.marketplace-ad-provider-slot {
-  display: flex;
-  width: 100%;
-  height: 100%;
-  align-items: center;
-  aspect-ratio: 1 / 1;
-  justify-content: center;
-  overflow: hidden;
-  padding: 0;
-}
-
-.marketplace-ad-provider-slot.is-filled {
-  width: 100%;
-  height: 100%;
-}
-
-.marketplace-ad-provider-slot > * {
-  flex: 0 0 auto;
-  margin: auto;
-}
-
-.marketplace-ad-provider-slot iframe,
-.marketplace-ad-provider-slot img,
-.marketplace-ad-provider-slot video,
-.marketplace-ad-provider-slot canvas,
-.marketplace-ad-provider-slot object,
-.marketplace-ad-provider-slot embed,
-.marketplace-ad-provider-slot ins {
-  display: block;
-  max-width: none;
-  max-height: none;
-}
-
-.marketplace-ad-provider-slot ins {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.marketplace-ad-provider-slot ins > * {
-  flex: 0 0 auto;
-  margin: auto;
-}
-
-.marketplace-ad-fallback {
-  width: 100%;
-  height: 100%;
-}
-
-.marketplace-ad-fallback[hidden] {
-  display: none;
-}
-
 .ad-fallback-grid {
   display: grid;
   gap: 10px;
@@ -2731,8 +2595,50 @@ select {
   font-weight: 900;
 }
 
-.post-text {
+.post-text,
+.comment-text {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.expandable-text {
+  position: relative;
+  max-height: 9.5em;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.expandable-text::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2.6em;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--surface) 72%);
+}
+
+.marketplace-post-card .expandable-text::after,
+.post-detail-post .expandable-text::after,
+.media-lightbox-context .expandable-text::after {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--surface-strong) 72%);
+}
+
+.expandable-text-toggle {
+  justify-self: start;
+  width: fit-content;
+  min-height: 0;
+  padding: 2px 0;
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.comment-text.expandable-text {
+  max-height: 7.2em;
 }
 
 .post-edit-form {
@@ -5057,6 +4963,32 @@ video.media-frame {
 
 .admin-ticket-source-profile-link:hover {
   text-decoration: underline;
+}
+
+.admin-post-link {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 8px;
+  background: rgba(88, 170, 255, 0.12);
+  color: #1d4ed8;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.admin-post-link:hover {
+  border-color: rgba(37, 99, 235, 0.38);
+  background: rgba(88, 170, 255, 0.2);
+  text-decoration: none;
+}
+
+.admin-post-link-unavailable {
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .admin-ticket-source-body dl {

@@ -92,13 +92,12 @@ export async function registerTicketReply(env, conversationId, senderId) {
   const ticket = await getRequesterTicketForConversation(env, conversationId, senderId);
   if (!ticket) return;
 
-  if (ticket.status !== "resolved") return;
-
   await mutateRows(env, "admin_tickets", {
     method: "PATCH",
     params: { id: `eq.${ticket.id}` },
     body: {
-      status: "reopened",
+      ...(ticket.status === "resolved" ? { status: "reopened" } : {}),
+      user_can_reply: true,
     },
     prefer: "return=minimal",
   });

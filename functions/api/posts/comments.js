@@ -1,11 +1,13 @@
 import { getSupabaseRestUrl, jsonResponse, requireAuthUser } from "../../_shared/auth.js";
 import { getServiceHeaders } from "../../_shared/admin.js";
 
+const MAX_COMMENT_LENGTH = 5000;
+
 function cleanText(value, maxLength) {
-  return String(value || "")
+  const text = String(value || "")
     .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, maxLength);
+    .trim();
+  return Number.isFinite(maxLength) ? text.slice(0, maxLength) : text;
 }
 
 function cleanNumber(value, fallback, { min = 0, max = 100 } = {}) {
@@ -533,7 +535,7 @@ export async function onRequestPost({ request, env, waitUntil }) {
     const payload = await request.json().catch(() => ({}));
     const postId = cleanText(payload.postId || payload.post, 80);
     const parentCommentId = cleanText(payload.parentCommentId || payload.parentComment || "", 80) || null;
-    const body = cleanText(payload.body, 500);
+    const body = cleanText(payload.body, MAX_COMMENT_LENGTH);
     const media = normalizeCommentMedia(payload.media || null);
 
     if (!postId) {
